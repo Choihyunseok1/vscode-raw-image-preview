@@ -50,6 +50,7 @@ class RawBayerPreviewProvider {
       pattern: config.get('defaultBayerPattern', 'RGGB'),
       channelOrder: config.get('defaultChannelOrder', 'RGGB'),
       bitDepth: config.get('defaultBitDepth', 8),
+      sampleFormat: config.get('defaultSampleFormat', 'uint'),
       endian: config.get('defaultEndian', 'little'),
       packing: 'unpacked',
       black: 0,
@@ -134,7 +135,15 @@ class RawBayerPreviewProvider {
           <option value="12">12-bit</option>
           <option value="14">14-bit</option>
           <option value="16">16-bit</option>
-          <option value="32">32-bit float</option>
+          <option value="32">32-bit</option>
+          <option value="64">64-bit</option>
+        </select>
+      </label>
+      <label>Sample Type
+        <select id="sampleFormat">
+          <option value="uint">Unsigned integer</option>
+          <option value="int">Signed integer</option>
+          <option value="float">Float</option>
         </select>
       </label>
       <label>Endian

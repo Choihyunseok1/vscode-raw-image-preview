@@ -104,6 +104,97 @@ test('packed formats imply their effective bit depth and expected size', () => {
   assert.equal(core.expectedBytes(raw12), 3);
 });
 
+test('NPY HWC array metadata configures an interleaved 4-channel Bayer preview', () => {
+  const payload = Uint8Array.of(
+    10, 20, 30, 40,
+    11, 21, 31, 41,
+    12, 22, 32, 42,
+    13, 23, 33, 43
+  );
+  const npy = makeNpy('|u1', [2, 2, 4], payload);
+  const prepared = core.prepareInput(npy, {
+    pattern: 'RGGB',
+    channelOrder: 'BGGR',
+    normalize: false,
+    white: 255
+  }, 'tile.npy');
+
+  assert.equal(prepared.metadata.format, 'npy');
+  assert.equal(prepared.settings.width, 2);
+  assert.equal(prepared.settings.height, 2);
+  assert.equal(prepared.settings.channels, 4);
+  assert.equal(prepared.settings.bitDepth, 8);
+  assert.equal(prepared.settings.sampleFormat, 'uint');
+
+  const result = core.renderToRgba(prepared.bytes, prepared.settings);
+  assert.deepEqual([...result.data], [
+    40, 0, 0, 255,
+    0, 21, 0, 255,
+    0, 32, 0, 255,
+    0, 0, 13, 255
+  ]);
+});
+
+test('NPY CHW array is mapped into RGB logical sample order', () => {
+  const payload = Uint8Array.of(
+    1, 2, 3, 4,
+    10, 20, 30, 40,
+    100, 110, 120, 130
+  );
+  const npy = makeNpy('|u1', [3, 2, 2], payload);
+  const prepared = core.prepareInput(npy, {
+    normalize: false,
+    white: 255
+  }, 'chw.npy');
+  const result = core.renderToRgba(prepared.bytes, prepared.settings);
+
+  assert.equal(prepared.settings.channels, 3);
+  assert.deepEqual([...result.data], [
+    1, 10, 100, 255,
+    2, 20, 110, 255,
+    3, 30, 120, 255,
+    4, 40, 130, 255
+  ]);
+});
+
+test('NPY signed integer dtype is read with signed sample semantics', () => {
+  const payload = new Uint8Array(4);
+  const view = new DataView(payload.buffer);
+  view.setInt16(0, -10, true);
+  view.setInt16(2, 20, true);
+  const npy = makeNpy('<i2', [1, 2], payload);
+  const prepared = core.prepareInput(npy, { normalize: true }, 'signed.npy');
+  const result = core.renderToRgba(prepared.bytes, prepared.settings);
+
+  assert.equal(prepared.settings.sampleFormat, 'int');
+  assert.deepEqual(result.range, { black: -10, white: 20 });
+  assert.deepEqual([...result.data], [
+    0, 0, 0, 255,
+    0, 255, 0, 255
+  ]);
+});
+
+test('binary PGM header configures payload offset and image dimensions', () => {
+  const pgm = concatBytes(ascii('P5\n# comment\n2 2\n255\n'), Uint8Array.of(0, 64, 128, 255));
+  const prepared = core.prepareInput(pgm, {
+    pattern: 'RGGB',
+    normalize: false,
+    white: 255
+  }, 'test.pgm');
+  const result = core.renderToRgba(prepared.bytes, prepared.settings);
+
+  assert.equal(prepared.metadata.format, 'pgm');
+  assert.equal(prepared.settings.width, 2);
+  assert.equal(prepared.settings.height, 2);
+  assert.equal(prepared.settings.channels, 1);
+  assert.deepEqual([...result.data], [
+    0, 0, 0, 255,
+    0, 64, 0, 255,
+    0, 128, 0, 255,
+    0, 0, 255, 255
+  ]);
+});
+
 function packMipi10(samples) {
   return Uint8Array.of(
     samples[0] >> 2,
@@ -123,4 +214,34 @@ function packMipi12(samples) {
     samples[1] >> 4,
     (samples[0] & 0x0f) | ((samples[1] & 0x0f) << 4)
   );
+}
+
+function makeNpy(descr, shape, payload) {
+  const shapeText = shape.length === 1 ? `${shape[0]},` : shape.join(', ');
+  let header = `{'descr': '${descr}', 'fortran_order': False, 'shape': (${shapeText}), }`;
+  const preambleLength = 10;
+  const padding = 16 - ((preambleLength + header.length + 1) % 16);
+  header = `${header}${' '.repeat(padding === 16 ? 0 : padding)}\n`;
+  const output = new Uint8Array(preambleLength + header.length + payload.length);
+  output.set(Uint8Array.of(0x93, 0x4e, 0x55, 0x4d, 0x50, 0x59, 1, 0), 0);
+  output[8] = header.length & 0xff;
+  output[9] = header.length >> 8;
+  output.set(ascii(header), preambleLength);
+  output.set(payload, preambleLength + header.length);
+  return output;
+}
+
+function ascii(text) {
+  return Uint8Array.from([...text].map((char) => char.charCodeAt(0)));
+}
+
+function concatBytes(...chunks) {
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const output = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return output;
 }

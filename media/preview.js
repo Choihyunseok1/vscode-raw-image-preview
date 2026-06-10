@@ -10,6 +10,7 @@ const controls = {
   pattern: document.getElementById('pattern'),
   channelOrder: document.getElementById('channelOrder'),
   bitDepth: document.getElementById('bitDepth'),
+  sampleFormat: document.getElementById('sampleFormat'),
   endian: document.getElementById('endian'),
   packing: document.getElementById('packing'),
   normalize: document.getElementById('normalize'),
@@ -32,6 +33,7 @@ const controls = {
 let raw = null;
 let renderToken = 0;
 let zoomValue = 100;
+let sourceLayout = null;
 const ctx = controls.canvas.getContext('2d', { alpha: false, willReadFrequently: false });
 const restoredState = vscode.getState() || {};
 
@@ -45,10 +47,21 @@ window.addEventListener('message', (event) => {
     return;
   }
 
-  raw = new Uint8Array(message.buffer);
-  const settings = { ...message.settings, ...(restoredState.settings || {}) };
-  const filenameGuess = !restoredState.settings
-    ? renderCore.guessDimensions(message.byteLength, settings, message.name)
+  const sourceBytes = new Uint8Array(message.buffer);
+  const baseSettings = { ...message.settings, ...(restoredState.settings || {}) };
+  let prepared;
+  try {
+    prepared = renderCore.prepareInput(sourceBytes, baseSettings, message.name);
+  } catch (error) {
+    controls.status.textContent = `Unsupported file: ${error.message}`;
+    return;
+  }
+
+  raw = prepared.bytes;
+  sourceLayout = prepared.settings.sourceLayout || null;
+  const settings = prepared.settings;
+  const filenameGuess = prepared.metadata.format === 'raw' && !restoredState.settings
+    ? renderCore.guessDimensions(raw.byteLength, settings, message.name)
     : null;
   if (filenameGuess?.source === 'filename') {
     settings.width = filenameGuess.width;
@@ -57,7 +70,7 @@ window.addEventListener('message', (event) => {
 
   applySettings(settings);
   controls.fileName.textContent = message.name;
-  controls.fileMeta.textContent = `${formatBytes(message.byteLength)} loaded`;
+  controls.fileMeta.textContent = `${formatBytes(message.byteLength)} loaded, ${prepared.metadata.label}`;
   render();
 });
 
@@ -77,9 +90,9 @@ controls.stage.addEventListener('wheel', (event) => {
   setZoom(zoomValue + (event.deltaY < 0 ? 10 : -10));
 }, { passive: false });
 
-for (const id of ['width', 'height', 'channels', 'pattern', 'channelOrder', 'bitDepth', 'endian', 'packing', 'normalize', 'black', 'white']) {
+for (const id of ['width', 'height', 'channels', 'pattern', 'channelOrder', 'bitDepth', 'sampleFormat', 'endian', 'packing', 'normalize', 'black', 'white']) {
   controls[id].addEventListener('change', () => {
-    if (id === 'packing') {
+    if (id === 'packing' || id === 'bitDepth' || id === 'sampleFormat') {
       syncPackingBitDepth();
     }
     scheduleRender();
@@ -97,6 +110,7 @@ function applySettings(settings) {
   controls.pattern.value = normalized.pattern;
   controls.channelOrder.value = normalized.channelOrder;
   controls.bitDepth.value = normalized.bitDepth;
+  controls.sampleFormat.value = normalized.sampleFormat;
   controls.endian.value = normalized.endian;
   controls.packing.value = normalized.packing;
   controls.normalize.checked = normalized.normalize;
@@ -171,12 +185,14 @@ function readSettings() {
     pattern: controls.pattern.value,
     channelOrder: controls.channelOrder.value,
     bitDepth: Number(controls.bitDepth.value),
+    sampleFormat: controls.sampleFormat.value,
     endian: controls.endian.value,
     packing: controls.packing.value,
     normalize: controls.normalize.checked,
     black: Number(controls.black.value),
     white: Number(controls.white.value),
-    gain: Number(controls.gain.value)
+    gain: Number(controls.gain.value),
+    sourceLayout
   };
 }
 
@@ -203,14 +219,28 @@ function syncPackingBitDepth() {
   if (controls.packing.value === 'mipi10') {
     controls.bitDepth.value = '10';
     controls.bitDepth.disabled = true;
+    controls.sampleFormat.value = 'uint';
+    controls.sampleFormat.disabled = true;
     return;
   }
   if (controls.packing.value === 'mipi12') {
     controls.bitDepth.value = '12';
     controls.bitDepth.disabled = true;
+    controls.sampleFormat.value = 'uint';
+    controls.sampleFormat.disabled = true;
     return;
   }
+  if (controls.bitDepth.value === '64') {
+    controls.sampleFormat.value = 'float';
+    controls.sampleFormat.disabled = true;
+    controls.bitDepth.disabled = false;
+    return;
+  }
+  if (controls.sampleFormat.value === 'float' && controls.bitDepth.value !== '32') {
+    controls.bitDepth.value = '32';
+  }
   controls.bitDepth.disabled = false;
+  controls.sampleFormat.disabled = false;
 }
 
 function setZoom(value) {

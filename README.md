@@ -8,7 +8,9 @@ VS Code extension for previewing generic RAW image buffers in an interactive web
 - Supports 1-channel Bayer mosaic, 3-channel RGB, and 4-channel Bayer pixel-shuffle layouts.
 - Configurable Bayer patterns: `RGGB`, `BGGR`, `GRBG`, `GBRG`.
 - Configurable 4-channel order, so buffers stored as `RGGB`, `BGGR`, `GRBG`, or `GBRG` can be shuffled into the selected Bayer pattern.
-- Supports common sample layouts: 8-bit, 10/12/14/16-bit unpacked, 32-bit float, MIPI RAW10 packed, MIPI RAW12 packed.
+- Supports common sample layouts: unsigned/signed integer, 8/10/12/14/16/32-bit unpacked, 32/64-bit float, MIPI RAW10 packed, MIPI RAW12 packed.
+- Auto-detects NumPy `.npy` array headers for dtype, shape, endian, and common HWC/CHW image layouts.
+- Auto-detects binary PGM/PPM/PNM headers for image dimensions and max value.
 - Interactive width, height, channels, bit depth, endian, black/white, normalize, gain, dimension guess, fit, and zoom controls.
 
 ## 4-channel Bayer shuffle assumption
@@ -28,12 +30,21 @@ If the file channel order is `BGGR`, the preview pulls the blue sample from chan
 
 RAW buffers usually do not carry width, height, Bayer layout, or bit-depth metadata. Use the controls in the preview to set the layout. The **Guess** button can infer dimensions from filenames such as `frame_1920x1080.raw` or from common byte-size matches.
 
+Header-aware formats:
+
+- `.npy`: supports 2D grayscale/Bayer, HWC, CHW, single-batch NHWC/NCHW arrays with `uint8`, `uint16`, `uint32`, `int8`, `int16`, `int32`, `float32`, and `float64` dtypes.
+- `.pgm`, `.ppm`, `.pnm`: supports binary `P5` and `P6`.
+
+Raw-like extensions opened with manual controls include `.raw`, `.bin`, `.dat`, `.rggb`, `.bggr`, `.grbg`, `.gbrg`, `.bayer`, `.mipi`, `.raw10`, `.raw12`, `.gray`, `.rgb`, `.u8`, `.u16`, `.i16`, `.f32`, `.f64`, `.y`, `.y8`, and `.y16`.
+
+`.npz` is not treated as supported yet because it is a ZIP archive that may contain multiple arrays and compression.
+
 ## Local development
 
 1. Install Node.js.
 2. Open this folder in VS Code.
 3. Press `F5` to launch an Extension Development Host.
-4. Open a `.raw`, `.bin`, `.dat`, `.rggb`, `.bggr`, `.grbg`, or `.gbrg` file with **RAW Bayer Preview**.
+4. Open a supported RAW-like, `.npy`, `.pgm`, `.ppm`, or `.pnm` file with **RAW Bayer Preview**.
 
 ## Test and verify
 
@@ -43,7 +54,7 @@ npm test
 npm run check
 ```
 
-The tests cover 4-channel Bayer pixel shuffle, visible-sample auto normalization, MIPI RAW10/RAW12 unpacking, 16-bit endian handling, packed-format byte counts, and dimension guessing.
+The tests cover 4-channel Bayer pixel shuffle, visible-sample auto normalization, MIPI RAW10/RAW12 unpacking, 16-bit endian handling, packed-format byte counts, `.npy` HWC/CHW parsing, signed integer dtype handling, binary PGM parsing, and dimension guessing.
 
 ## Package VSIX
 

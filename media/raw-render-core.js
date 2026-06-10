@@ -9,20 +9,30 @@
 
   const PATTERNS = ['RGGB', 'BGGR', 'GRBG', 'GBRG'];
   const PACKINGS = ['unpacked', 'mipi10', 'mipi12'];
-  const BIT_DEPTHS = [8, 10, 12, 14, 16, 32];
+  const BIT_DEPTHS = [8, 10, 12, 14, 16, 32, 64];
   const CHANNELS = [1, 3, 4];
+  const SAMPLE_FORMATS = ['uint', 'int', 'float'];
   const MAX_PIXELS = 120000000;
 
   function normalizeSettings(settings) {
     const source = settings || {};
     const packing = PACKINGS.includes(source.packing) ? source.packing : 'unpacked';
     let bitDepth = numberFrom(source.bitDepth, 8);
+    let sampleFormat = SAMPLE_FORMATS.includes(source.sampleFormat) ? source.sampleFormat : 'uint';
     if (packing === 'mipi10') {
       bitDepth = 10;
+      sampleFormat = 'uint';
     } else if (packing === 'mipi12') {
       bitDepth = 12;
+      sampleFormat = 'uint';
     } else if (!BIT_DEPTHS.includes(bitDepth)) {
       bitDepth = 8;
+    }
+    if (sampleFormat === 'float' && bitDepth !== 32 && bitDepth !== 64) {
+      bitDepth = 32;
+    }
+    if (bitDepth === 64 && sampleFormat !== 'float') {
+      sampleFormat = 'float';
     }
 
     const channels = CHANNELS.includes(Number(source.channels)) ? Number(source.channels) : 4;
@@ -36,12 +46,14 @@
       pattern: patternFrom(source.pattern, 'RGGB'),
       channelOrder: patternFrom(source.channelOrder, 'RGGB'),
       bitDepth,
+      sampleFormat,
       endian: source.endian === 'big' ? 'big' : 'little',
       packing,
       normalize: source.normalize !== false,
       black,
       white,
-      gain: Math.max(0.01, finiteNumber(source.gain, 1))
+      gain: Math.max(0.01, finiteNumber(source.gain, 1)),
+      sourceLayout: normalizeSourceLayout(source.sourceLayout)
     };
   }
 
@@ -77,6 +89,9 @@
     if (bitDepth === 32) {
       return 4;
     }
+    if (bitDepth === 64) {
+      return 8;
+    }
     return 2;
   }
 
@@ -89,22 +104,52 @@
     if (normalized.packing === 'mipi12') {
       return makeMipi12Reader(bytes);
     }
+    let reader;
     if (normalized.bitDepth === 8) {
-      return (index) => bytes[index] || 0;
+      reader = normalized.sampleFormat === 'int'
+        ? (index) => index < bytes.length ? int8(bytes[index]) : 0
+        : (index) => bytes[index] || 0;
+      return wrapSourceLayoutReader(reader, normalized);
     }
 
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-    if (normalized.bitDepth === 32) {
-      return (index) => {
+    if (normalized.sampleFormat === 'float' && normalized.bitDepth === 32) {
+      reader = (index) => {
         const offset = index * 4;
         return offset + 3 < bytes.byteLength ? view.getFloat32(offset, normalized.endian === 'little') : 0;
       };
+      return wrapSourceLayoutReader(reader, normalized);
+    }
+    if (normalized.sampleFormat === 'float' && normalized.bitDepth === 64) {
+      reader = (index) => {
+        const offset = index * 8;
+        return offset + 7 < bytes.byteLength ? view.getFloat64(offset, normalized.endian === 'little') : 0;
+      };
+      return wrapSourceLayoutReader(reader, normalized);
+    }
+    if (normalized.bitDepth === 32) {
+      reader = (index) => {
+        const offset = index * 4;
+        if (offset + 3 >= bytes.byteLength) {
+          return 0;
+        }
+        return normalized.sampleFormat === 'int'
+          ? view.getInt32(offset, normalized.endian === 'little')
+          : view.getUint32(offset, normalized.endian === 'little');
+      };
+      return wrapSourceLayoutReader(reader, normalized);
     }
 
-    return (index) => {
+    reader = (index) => {
       const offset = index * 2;
-      return offset + 1 < bytes.byteLength ? view.getUint16(offset, normalized.endian === 'little') : 0;
+      if (offset + 1 >= bytes.byteLength) {
+        return 0;
+      }
+      return normalized.sampleFormat === 'int'
+        ? view.getInt16(offset, normalized.endian === 'little')
+        : view.getUint16(offset, normalized.endian === 'little');
     };
+    return wrapSourceLayoutReader(reader, normalized);
   }
 
   function makeMipi10Reader(bytes) {
@@ -133,8 +178,11 @@
 
   function maxSample(settings) {
     const normalized = normalizeSettings(settings);
-    if (normalized.bitDepth === 32) {
+    if (normalized.sampleFormat === 'float') {
       return 1;
+    }
+    if (normalized.sampleFormat === 'int') {
+      return Math.pow(2, normalized.bitDepth - 1) - 1;
     }
     return Math.pow(2, normalized.bitDepth) - 1;
   }
@@ -182,6 +230,64 @@
       return pixel * 4 + channelForPosition[position];
     }
     return visibleIndex;
+  }
+
+  function wrapSourceLayoutReader(reader, settings) {
+    const layout = settings.sourceLayout;
+    if (!layout || layout.kind !== 'ndarray') {
+      return reader;
+    }
+    if (!sourceLayoutMatchesSettings(layout, settings)) {
+      return reader;
+    }
+
+    const strides = ndarrayStrides(layout.shape, layout.fortranOrder);
+    return (logicalIndex) => reader(mapLogicalIndexToNdarrayIndex(logicalIndex, settings, layout, strides));
+  }
+
+  function sourceLayoutMatchesSettings(layout, settings) {
+    if (!Array.isArray(layout.shape)) {
+      return false;
+    }
+    if (layout.shape[layout.heightAxis] !== settings.height || layout.shape[layout.widthAxis] !== settings.width) {
+      return false;
+    }
+    if (layout.channelAxis === null || layout.channelAxis === undefined) {
+      return settings.channels === 1;
+    }
+    return layout.shape[layout.channelAxis] === settings.channels;
+  }
+
+  function ndarrayStrides(shape, fortranOrder) {
+    const strides = new Array(shape.length).fill(1);
+    if (fortranOrder) {
+      for (let i = 1; i < shape.length; i += 1) {
+        strides[i] = strides[i - 1] * shape[i - 1];
+      }
+      return strides;
+    }
+    for (let i = shape.length - 2; i >= 0; i -= 1) {
+      strides[i] = strides[i + 1] * shape[i + 1];
+    }
+    return strides;
+  }
+
+  function mapLogicalIndexToNdarrayIndex(logicalIndex, settings, layout, strides) {
+    const channel = layout.channelAxis === null || layout.channelAxis === undefined
+      ? 0
+      : logicalIndex % settings.channels;
+    const pixel = layout.channelAxis === null || layout.channelAxis === undefined
+      ? logicalIndex
+      : Math.floor(logicalIndex / settings.channels);
+    const y = Math.floor(pixel / settings.width);
+    const x = pixel % settings.width;
+    const coords = new Array(layout.shape.length).fill(0);
+    coords[layout.heightAxis] = y;
+    coords[layout.widthAxis] = x;
+    if (layout.channelAxis !== null && layout.channelAxis !== undefined) {
+      coords[layout.channelAxis] = channel;
+    }
+    return coords.reduce((offset, coord, axis) => offset + coord * strides[axis], 0);
   }
 
   function fillImageData(out, samples, settings, range) {
@@ -279,6 +385,263 @@
     });
   }
 
+  function prepareInput(inputBytes, settings, fileName) {
+    const bytes = inputBytes instanceof Uint8Array ? inputBytes : new Uint8Array(inputBytes || []);
+    if (isNpy(bytes)) {
+      const npy = parseNpy(bytes);
+      return {
+        bytes: bytes.subarray(npy.dataOffset),
+        settings: normalizeSettings({ ...settings, ...npy.settings }),
+        metadata: {
+          format: 'npy',
+          label: `NPY ${npy.descr} ${npy.shape.join('x')}`,
+          dataOffset: npy.dataOffset,
+          sourceName: fileName || ''
+        }
+      };
+    }
+
+    const pnm = parsePnm(bytes);
+    if (pnm) {
+      return {
+        bytes: bytes.subarray(pnm.dataOffset),
+        settings: normalizeSettings({ ...settings, sourceLayout: null, ...pnm.settings }),
+        metadata: {
+          format: pnm.format,
+          label: `${pnm.format.toUpperCase()} ${pnm.width}x${pnm.height} max ${pnm.maxValue}`,
+          dataOffset: pnm.dataOffset,
+          sourceName: fileName || ''
+        }
+      };
+    }
+
+    return {
+      bytes,
+      settings: normalizeSettings({ ...settings, sourceLayout: null }),
+      metadata: {
+        format: 'raw',
+        label: 'RAW buffer',
+        dataOffset: 0,
+        sourceName: fileName || ''
+      }
+    };
+  }
+
+  function isNpy(bytes) {
+    return bytes.length >= 10 &&
+      bytes[0] === 0x93 &&
+      bytes[1] === 0x4e &&
+      bytes[2] === 0x55 &&
+      bytes[3] === 0x4d &&
+      bytes[4] === 0x50 &&
+      bytes[5] === 0x59;
+  }
+
+  function parseNpy(bytes) {
+    const major = bytes[6];
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let headerLength;
+    let headerOffset;
+    if (major === 1) {
+      headerLength = view.getUint16(8, true);
+      headerOffset = 10;
+    } else if (major === 2 || major === 3) {
+      headerLength = view.getUint32(8, true);
+      headerOffset = 12;
+    } else {
+      throw new Error(`Unsupported NPY version ${major}.${bytes[7]}.`);
+    }
+
+    const dataOffset = headerOffset + headerLength;
+    if (dataOffset > bytes.length) {
+      throw new Error('Invalid NPY header length.');
+    }
+
+    const header = decodeAscii(bytes.subarray(headerOffset, dataOffset));
+    const descr = matchHeaderValue(header, 'descr');
+    const shape = parseNpyShape(header);
+    const fortranOrder = parseNpyFortranOrder(header);
+    const dtype = dtypeFromNpyDescr(descr);
+    const layout = imageLayoutFromShape(shape, fortranOrder);
+
+    return {
+      descr,
+      shape,
+      dataOffset,
+      settings: {
+        width: shape[layout.widthAxis],
+        height: shape[layout.heightAxis],
+        channels: layout.channelAxis === null ? 1 : shape[layout.channelAxis],
+        bitDepth: dtype.bitDepth,
+        sampleFormat: dtype.sampleFormat,
+        endian: dtype.endian,
+        packing: 'unpacked',
+        sourceLayout: {
+          kind: 'ndarray',
+          shape,
+          fortranOrder,
+          heightAxis: layout.heightAxis,
+          widthAxis: layout.widthAxis,
+          channelAxis: layout.channelAxis
+        }
+      }
+    };
+  }
+
+  function matchHeaderValue(header, key) {
+    const pattern = new RegExp(`['"]${key}['"]\\s*:\\s*['"]([^'"]+)['"]`);
+    const match = header.match(pattern);
+    if (!match) {
+      throw new Error(`Invalid NPY header: missing ${key}.`);
+    }
+    return match[1];
+  }
+
+  function parseNpyShape(header) {
+    const match = header.match(/['"]shape['"]\s*:\s*\(([^)]*)\)/);
+    if (!match) {
+      throw new Error('Invalid NPY header: missing shape.');
+    }
+    const shape = match[1]
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => Number(part));
+    if (shape.length < 2 || shape.some((value) => !Number.isSafeInteger(value) || value < 1)) {
+      throw new Error(`Unsupported NPY shape (${match[1]}).`);
+    }
+    return shape;
+  }
+
+  function parseNpyFortranOrder(header) {
+    const match = header.match(/['"]fortran_order['"]\s*:\s*(True|False)/);
+    if (!match) {
+      throw new Error('Invalid NPY header: missing fortran_order.');
+    }
+    return match[1] === 'True';
+  }
+
+  function dtypeFromNpyDescr(descr) {
+    const match = String(descr).trim().match(/^([<>=|])([A-Za-z])(\d+)$/);
+    if (!match) {
+      throw new Error(`Unsupported NPY dtype ${descr}.`);
+    }
+    const endian = match[1] === '>' ? 'big' : 'little';
+    const kind = match[2].toLowerCase();
+    const bytes = Number(match[3]);
+    const bitDepth = bytes * 8;
+
+    if (kind === 'u' && [8, 16, 32].includes(bitDepth)) {
+      return { bitDepth, sampleFormat: 'uint', endian };
+    }
+    if (kind === 'i' && [8, 16, 32].includes(bitDepth)) {
+      return { bitDepth, sampleFormat: 'int', endian };
+    }
+    if (kind === 'f' && [32, 64].includes(bitDepth)) {
+      return { bitDepth, sampleFormat: 'float', endian };
+    }
+    if (kind === 'b' && bitDepth === 8) {
+      return { bitDepth: 8, sampleFormat: 'uint', endian: 'little' };
+    }
+    throw new Error(`Unsupported NPY dtype ${descr}.`);
+  }
+
+  function imageLayoutFromShape(shape) {
+    if (shape.length === 2) {
+      return { heightAxis: 0, widthAxis: 1, channelAxis: null };
+    }
+    if (shape.length === 3 && CHANNELS.includes(shape[2])) {
+      return { heightAxis: 0, widthAxis: 1, channelAxis: 2 };
+    }
+    if (shape.length === 3 && CHANNELS.includes(shape[0])) {
+      return { heightAxis: 1, widthAxis: 2, channelAxis: 0 };
+    }
+    if (shape.length === 4 && shape[0] === 1 && CHANNELS.includes(shape[3])) {
+      return { heightAxis: 1, widthAxis: 2, channelAxis: 3 };
+    }
+    if (shape.length === 4 && shape[0] === 1 && CHANNELS.includes(shape[1])) {
+      return { heightAxis: 2, widthAxis: 3, channelAxis: 1 };
+    }
+    throw new Error(`Unsupported NPY image shape (${shape.join(', ')}).`);
+  }
+
+  function parsePnm(bytes) {
+    if (bytes.length < 3 || bytes[0] !== 0x50) {
+      return null;
+    }
+    const magic = `P${String.fromCharCode(bytes[1])}`;
+    if (magic !== 'P5' && magic !== 'P6') {
+      return null;
+    }
+
+    let token = nextPnmToken(bytes, 2);
+    const width = positiveInteger(token.value, 0);
+    token = nextPnmToken(bytes, token.next);
+    const height = positiveInteger(token.value, 0);
+    token = nextPnmToken(bytes, token.next);
+    const maxValue = positiveInteger(token.value, 0);
+    if (!width || !height || !maxValue) {
+      throw new Error(`Invalid ${magic} header.`);
+    }
+
+    let dataOffset = token.next;
+    if (bytes[dataOffset] === 0x0d && bytes[dataOffset + 1] === 0x0a) {
+      dataOffset += 2;
+    } else if (isWhitespace(bytes[dataOffset])) {
+      dataOffset += 1;
+    }
+    return {
+      format: magic === 'P5' ? 'pgm' : 'ppm',
+      width,
+      height,
+      maxValue,
+      dataOffset,
+      settings: {
+        width,
+        height,
+        channels: magic === 'P5' ? 1 : 3,
+        bitDepth: maxValue <= 255 ? 8 : 16,
+        sampleFormat: 'uint',
+        endian: 'big',
+        packing: 'unpacked',
+        black: 0,
+        white: maxValue
+      }
+    };
+  }
+
+  function nextPnmToken(bytes, start) {
+    let index = skipPnmSpaceAndComments(bytes, start);
+    const tokenStart = index;
+    while (index < bytes.length && !isWhitespace(bytes[index]) && bytes[index] !== 0x23) {
+      index += 1;
+    }
+    if (tokenStart === index) {
+      throw new Error('Invalid PNM header.');
+    }
+    return { value: decodeAscii(bytes.subarray(tokenStart, index)), next: index };
+  }
+
+  function skipPnmSpaceAndComments(bytes, start) {
+    let index = start;
+    while (index < bytes.length) {
+      while (index < bytes.length && isWhitespace(bytes[index])) {
+        index += 1;
+      }
+      if (bytes[index] !== 0x23) {
+        break;
+      }
+      while (index < bytes.length && bytes[index] !== 0x0a) {
+        index += 1;
+      }
+    }
+    return index;
+  }
+
+  function isWhitespace(byte) {
+    return byte === 0x09 || byte === 0x0a || byte === 0x0b || byte === 0x0c || byte === 0x0d || byte === 0x20;
+  }
+
   function guessDimensions(byteLength, settings, fileName) {
     const normalized = normalizeSettings(settings);
     const fromName = dimensionsFromName(fileName);
@@ -366,6 +729,35 @@
     return PATTERNS.includes(pattern) ? pattern : fallback;
   }
 
+  function normalizeSourceLayout(layout) {
+    if (!layout || layout.kind !== 'ndarray' || !Array.isArray(layout.shape)) {
+      return null;
+    }
+    const shape = layout.shape.map((value) => positiveInteger(value, 0));
+    if (shape.some((value) => value < 1)) {
+      return null;
+    }
+    const heightAxis = axisInteger(layout.heightAxis);
+    const widthAxis = axisInteger(layout.widthAxis);
+    const channelAxis = layout.channelAxis === null || layout.channelAxis === undefined
+      ? null
+      : axisInteger(layout.channelAxis);
+    if (heightAxis < 0 || widthAxis < 0 || heightAxis >= shape.length || widthAxis >= shape.length) {
+      return null;
+    }
+    if (channelAxis !== null && (channelAxis < 0 || channelAxis >= shape.length)) {
+      return null;
+    }
+    return {
+      kind: 'ndarray',
+      shape,
+      fortranOrder: Boolean(layout.fortranOrder),
+      heightAxis,
+      widthAxis,
+      channelAxis
+    };
+  }
+
   function numberFrom(value, fallback) {
     const number = Number(value);
     return Number.isFinite(number) ? number : fallback;
@@ -379,6 +771,11 @@
   function positiveInteger(value, fallback) {
     const number = Math.floor(Number(value));
     return Number.isFinite(number) && number > 0 ? number : fallback;
+  }
+
+  function axisInteger(value) {
+    const number = Math.floor(Number(value));
+    return Number.isFinite(number) && number >= 0 ? number : -1;
   }
 
   function toByte(value, black, scale, gain) {
@@ -395,14 +792,27 @@
     return scaled | 0;
   }
 
+  function int8(value) {
+    return value > 127 ? value - 256 : value;
+  }
+
   function formatNumber(value) {
     return Number(value).toLocaleString('en-US');
+  }
+
+  function decodeAscii(bytes) {
+    let text = '';
+    for (let i = 0; i < bytes.length; i += 1) {
+      text += String.fromCharCode(bytes[i]);
+    }
+    return text;
   }
 
   return {
     MAX_PIXELS,
     normalizeSettings,
     validateRenderable,
+    prepareInput,
     expectedBytes,
     makeSampleReader,
     makeMipi10Reader,
