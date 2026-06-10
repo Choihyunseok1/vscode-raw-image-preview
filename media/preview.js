@@ -37,6 +37,7 @@ let zoomValue = 100;
 let sourceLayout = null;
 let currentSourceName = '';
 let lockedFields = {};
+let fitOnNextRender = false;
 const ctx = controls.canvas.getContext('2d', { alpha: false, willReadFrequently: false });
 const restoredState = vscode.getState() || {};
 
@@ -82,6 +83,7 @@ window.addEventListener('message', (event) => {
   applySettings(settings);
   controls.fileName.textContent = message.name;
   controls.fileMeta.textContent = `${formatBytes(message.byteLength)} loaded, ${message.label || prepared.metadata.label}`;
+  fitOnNextRender = true;
   render();
 });
 
@@ -164,7 +166,9 @@ async function render() {
 
   controls.canvas.width = dimensions.width;
   controls.canvas.height = dimensions.height;
-  setZoom(zoomValue);
+  if (!fitOnNextRender) {
+    setZoom(zoomValue);
+  }
 
   let image;
   try {
@@ -182,6 +186,11 @@ async function render() {
   }
 
   ctx.putImageData(image, 0, 0);
+  if (fitOnNextRender) {
+    fitOnNextRender = false;
+    await nextFrame();
+    fitToStage();
+  }
 
   const warning = expected > raw.byteLength
     ? `, file is smaller than expected ${formatBytes(expected)}`
@@ -310,9 +319,11 @@ function setZoom(value) {
 function fitToStage() {
   const width = controls.canvas.width || 1;
   const height = controls.canvas.height || 1;
+  const availableWidth = Math.max(1, controls.stage.clientWidth - 32);
+  const availableHeight = Math.max(1, controls.stage.clientHeight - 32);
   const zoom = Math.floor(Math.min(
-    (controls.stage.clientWidth - 32) / width,
-    (controls.stage.clientHeight - 32) / height
+    availableWidth / width,
+    availableHeight / height
   ) * 100);
   setZoom(zoom);
 }
