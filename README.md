@@ -41,6 +41,7 @@ Header-aware formats:
 - `.npy`: supports 2D grayscale/Bayer, HWC, CHW, single-batch NHWC/NCHW arrays with `uint8`, `uint16`, `uint32`, `int8`, `int16`, `int32`, `float16`, `float32`, and `float64` dtypes.
 - `.pgm`, `.ppm`, `.pnm`: supports binary `P5` and `P6`.
 - Camera RAW such as `.cr2`, `.nef`, and `.arw`: uses the VS Code extension host to run Python `rawpy` and converts the camera RAW mosaic to an in-memory uint16 Bayer buffer. If Python `rawpy` or `numpy` is missing, the extension reports that dependency error instead of rendering camera RAW headers as pixels.
+- Headerless `.raw` buffers are auto-guessed on open, including common single-channel RAW12 packed sensor dumps such as `3840x2784`.
 
 For header-aware formats, bit depth, sample type, endian, and packing are read from the file and locked in the UI. Generic headerless RAW buffers keep those controls editable.
 

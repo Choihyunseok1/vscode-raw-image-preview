@@ -108,7 +108,7 @@
       return makeMipi10Reader(bytes);
     }
     if (normalized.packing === 'mipi12') {
-      return makeMipi12Reader(bytes);
+      return makeMipi12Reader(bytes, normalized.endian);
     }
     let reader;
     if (normalized.bitDepth === 8) {
@@ -194,11 +194,17 @@
     };
   }
 
-  function makeMipi12Reader(bytes) {
+  function makeMipi12Reader(bytes, endian) {
     return (index) => {
       const group = Math.floor(index / 2) * 3;
       if (group + 2 >= bytes.length) {
         return 0;
+      }
+      if (endian !== 'big') {
+        if ((index & 1) === 0) {
+          return bytes[group] | ((bytes[group + 2] & 0x0f) << 8);
+        }
+        return bytes[group + 1] | ((bytes[group + 2] & 0xf0) << 4);
       }
       if ((index & 1) === 0) {
         return (bytes[group] << 4) | (bytes[group + 2] & 0x0f);
@@ -879,9 +885,8 @@
     }
 
     const candidates = rawLayoutCandidates(bytes, normalized);
-    const preferredThreeByte = candidates.find((candidate) => candidate.kind === 'three-byte-integer');
-    if (preferredThreeByte) {
-      return preferredThreeByte.settings;
+    if (candidates.length) {
+      return candidates[0].settings;
     }
 
     const currentExpected = expectedBytes(normalized);
@@ -889,53 +894,71 @@
       return normalized;
     }
 
-    return candidates.length ? candidates[0].settings : null;
+    return null;
   }
 
   function rawLayoutCandidates(bytes, baseSettings) {
     const preferred24 = looksLikeThreeByteIntegerSamples(bytes);
     const candidates = [];
-    for (const bitDepth of [8, 16, 24, 32]) {
-      for (const channels of CHANNELS) {
-        const settings = normalizeSettings({
-          ...baseSettings,
-          channels,
-          bitDepth,
-          sampleFormat: 'uint',
-          packing: 'unpacked',
-          sourceLayout: null
-        });
-        const pixelCount = pixelCountFromBytes(bytes.byteLength, settings);
-        if (!pixelCount || expectedBytes({ ...settings, width: 1, height: pixelCount }) !== bytes.byteLength) {
-          continue;
-        }
-        const dimensions = dimensionsFromPixelCount(pixelCount);
-        if (!dimensions) {
-          continue;
-        }
-        let score = dimensions.source === 'common-size' ? 0 : 20;
-        if (preferred24 && bitDepth === 24 && channels === 1) {
-          score -= 10;
-        }
-        if (!preferred24 && bitDepth === 8 && channels === 3) {
-          score -= 2;
-        }
-        if (channels === baseSettings.channels) {
-          score -= 1;
-        }
-        candidates.push({
-          score,
-          kind: preferred24 && bitDepth === 24 && channels === 1 ? 'three-byte-integer' : 'generic',
-          settings: {
-            ...settings,
-            width: dimensions.width,
-            height: dimensions.height
-          }
-        });
+    const layouts = [
+      { packing: 'mipi12', bitDepth: 12, channels: [1] },
+      { packing: 'mipi10', bitDepth: 10, channels: [1] },
+      { packing: 'unpacked', bitDepth: 8, channels: CHANNELS },
+      { packing: 'unpacked', bitDepth: 16, channels: CHANNELS },
+      { packing: 'unpacked', bitDepth: 24, channels: CHANNELS },
+      { packing: 'unpacked', bitDepth: 32, channels: CHANNELS }
+    ];
+
+    for (const layout of layouts) {
+      for (const channels of layout.channels) {
+        addRawLayoutCandidate(candidates, bytes, baseSettings, layout, channels, preferred24);
       }
     }
     candidates.sort((a, b) => a.score - b.score);
     return candidates;
+  }
+
+  function addRawLayoutCandidate(candidates, bytes, baseSettings, layout, channels, preferred24) {
+    const settings = normalizeSettings({
+      ...baseSettings,
+      channels,
+      bitDepth: layout.bitDepth,
+      sampleFormat: 'uint',
+      packing: layout.packing,
+      endian: layout.packing === 'mipi12' ? 'little' : baseSettings.endian,
+      sourceLayout: null
+    });
+    const pixelCount = pixelCountFromBytes(bytes.byteLength, settings);
+    if (!pixelCount || expectedBytes({ ...settings, width: 1, height: pixelCount }) !== bytes.byteLength) {
+      return;
+    }
+    const dimensions = dimensionsFromPixelCount(pixelCount);
+    if (!dimensions) {
+      return;
+    }
+
+    let score = dimensions.source === 'common-size' ? 0 : 20;
+    if (layout.packing === 'mipi12') {
+      score -= 16;
+    } else if (layout.packing === 'mipi10') {
+      score -= 12;
+    } else if (preferred24 && layout.bitDepth === 24 && channels === 1) {
+      score -= 4;
+    } else if (!preferred24 && layout.bitDepth === 8 && channels === 3) {
+      score -= 2;
+    }
+    if (channels === baseSettings.channels && layout.packing === baseSettings.packing) {
+      score -= 1;
+    }
+
+    candidates.push({
+      score,
+      settings: {
+        ...settings,
+        width: dimensions.width,
+        height: dimensions.height
+      }
+    });
   }
 
   function dimensionsFromPixelCount(pixelCount) {
@@ -1026,6 +1049,7 @@
       { width: 2048, height: 1536 },
       { width: 2592, height: 1944 },
       { width: 2784, height: 1920 },
+      { width: 3840, height: 2784 },
       { width: 3840, height: 2160 },
       { width: 4096, height: 2160 },
       { width: 4096, height: 3072 }

@@ -136,7 +136,14 @@ test('MIPI RAW10 packed samples are unpacked correctly', () => {
 
 test('MIPI RAW12 packed samples are unpacked correctly', () => {
   const packed = packMipi12([0x123, 0xabc]);
-  const read = core.makeSampleReader(packed, { packing: 'mipi12' });
+  const read = core.makeSampleReader(packed, { packing: 'mipi12', endian: 'big' });
+
+  assert.deepEqual([read(0), read(1)], [0x123, 0xabc]);
+});
+
+test('little-endian RAW12 packed samples are unpacked correctly', () => {
+  const packed = packRaw12Little([0x123, 0xabc]);
+  const read = core.makeSampleReader(packed, { packing: 'mipi12', endian: 'little' });
 
   assert.deepEqual([read(0), read(1)], [0x123, 0xabc]);
 });
@@ -328,8 +335,8 @@ test('binary PGM max value configures logical bit depth', () => {
   ]);
 });
 
-test('raw settings inference recognizes padded 24-bit common dimensions', () => {
-  const bytes = new Uint8Array(2784 * 1920 * 3);
+test('raw settings inference recognizes unpacked 24-bit common dimensions', () => {
+  const bytes = new Uint8Array(1024 * 768 * 3);
   const guessed = core.guessRawSettings(bytes, {
     width: 1920,
     height: 1080,
@@ -338,14 +345,15 @@ test('raw settings inference recognizes padded 24-bit common dimensions', () => 
     packing: 'unpacked'
   }, 'night.raw');
 
-  assert.equal(guessed.width, 2784);
-  assert.equal(guessed.height, 1920);
+  assert.equal(guessed.width, 1024);
+  assert.equal(guessed.height, 768);
   assert.equal(guessed.channels, 1);
   assert.equal(guessed.bitDepth, 24);
+  assert.equal(guessed.packing, 'unpacked');
 });
 
-test('raw settings inference prefers 3-byte integer samples over RGB when high byte is small', () => {
-  const bytes = new Uint8Array(2784 * 1920 * 3);
+test('raw settings inference prefers RAW12 packed for sensor-sized buffers', () => {
+  const bytes = new Uint8Array(3840 * 2784 * 3 / 2);
   for (let offset = 0; offset < bytes.length; offset += 3) {
     bytes[offset] = 0xd1;
     bytes[offset + 1] = 0x13;
@@ -359,14 +367,16 @@ test('raw settings inference prefers 3-byte integer samples over RGB when high b
     packing: 'unpacked'
   }, 'day.raw');
 
-  assert.equal(guessed.width, 2784);
-  assert.equal(guessed.height, 1920);
+  assert.equal(guessed.width, 3840);
+  assert.equal(guessed.height, 2784);
   assert.equal(guessed.channels, 1);
-  assert.equal(guessed.bitDepth, 24);
+  assert.equal(guessed.bitDepth, 12);
+  assert.equal(guessed.packing, 'mipi12');
+  assert.equal(guessed.endian, 'little');
 });
 
-test('raw settings inference overrides ambiguous RGB state for 3-byte integer samples', () => {
-  const bytes = new Uint8Array(2784 * 1920 * 3);
+test('raw settings inference overrides stale 24-bit state for RAW12 packed buffers', () => {
+  const bytes = new Uint8Array(3840 * 2784 * 3 / 2);
   for (let offset = 0; offset < bytes.length; offset += 3) {
     bytes[offset] = 0x65;
     bytes[offset + 1] = 0x00;
@@ -375,15 +385,16 @@ test('raw settings inference overrides ambiguous RGB state for 3-byte integer sa
   const guessed = core.guessRawSettings(bytes, {
     width: 2784,
     height: 1920,
-    channels: 3,
-    bitDepth: 8,
+    channels: 1,
+    bitDepth: 24,
     packing: 'unpacked'
   }, 'night.raw');
 
-  assert.equal(guessed.width, 2784);
-  assert.equal(guessed.height, 1920);
+  assert.equal(guessed.width, 3840);
+  assert.equal(guessed.height, 2784);
   assert.equal(guessed.channels, 1);
-  assert.equal(guessed.bitDepth, 24);
+  assert.equal(guessed.bitDepth, 12);
+  assert.equal(guessed.packing, 'mipi12');
 });
 
 function packMipi10(samples) {
@@ -404,6 +415,14 @@ function packMipi12(samples) {
     samples[0] >> 4,
     samples[1] >> 4,
     (samples[0] & 0x0f) | ((samples[1] & 0x0f) << 4)
+  );
+}
+
+function packRaw12Little(samples) {
+  return Uint8Array.of(
+    samples[0] & 0xff,
+    samples[1] & 0xff,
+    ((samples[0] >> 8) & 0x0f) | (((samples[1] >> 8) & 0x0f) << 4)
   );
 }
 

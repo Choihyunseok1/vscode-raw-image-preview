@@ -71,7 +71,7 @@ window.addEventListener('message', (event) => {
   const rawGuess = prepared.metadata.format === 'raw' && message.format !== 'camera-raw'
     ? renderCore.guessRawSettings(raw, settings, message.name)
     : null;
-  if (rawGuess && (!restoredSettings || expected !== raw.byteLength)) {
+  if (rawGuess) {
     Object.assign(settings, rawGuess, {
       normalize: true,
       black: 0,
