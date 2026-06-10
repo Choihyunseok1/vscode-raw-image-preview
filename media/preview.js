@@ -36,6 +36,7 @@ let renderToken = 0;
 let zoomValue = 100;
 let sourceLayout = null;
 let currentSourceName = '';
+let lockedFields = {};
 const ctx = controls.canvas.getContext('2d', { alpha: false, willReadFrequently: false });
 const restoredState = vscode.getState() || {};
 
@@ -50,8 +51,9 @@ window.addEventListener('message', (event) => {
   }
 
   const sourceBytes = new Uint8Array(message.buffer);
+  lockedFields = { ...(message.lockedFields || {}) };
   const restoredSettings = restoredState.sourceName === message.name ? restoredState.settings : null;
-  const baseSettings = { ...message.settings, ...(restoredSettings || {}) };
+  const baseSettings = mergeUnlockedSettings(message.settings, restoredSettings, lockedFields);
   let prepared;
   try {
     prepared = renderCore.prepareInput(sourceBytes, baseSettings, message.name);
@@ -63,9 +65,10 @@ window.addEventListener('message', (event) => {
   raw = prepared.bytes;
   sourceLayout = prepared.settings.sourceLayout || null;
   currentSourceName = message.name;
+  lockedFields = { ...lockedFields, ...(prepared.metadata.lockedFields || {}) };
   const settings = prepared.settings;
   const expected = renderCore.expectedBytes(settings);
-  const rawGuess = prepared.metadata.format === 'raw'
+  const rawGuess = prepared.metadata.format === 'raw' && message.format !== 'cr2'
     ? renderCore.guessRawSettings(raw, settings, message.name)
     : null;
   if (rawGuess && (!restoredSettings || expected !== raw.byteLength)) {
@@ -78,7 +81,7 @@ window.addEventListener('message', (event) => {
 
   applySettings(settings);
   controls.fileName.textContent = message.name;
-  controls.fileMeta.textContent = `${formatBytes(message.byteLength)} loaded, ${prepared.metadata.label}`;
+  controls.fileMeta.textContent = `${formatBytes(message.byteLength)} loaded, ${message.label || prepared.metadata.label}`;
   render();
 });
 
@@ -214,6 +217,19 @@ function persistSettings() {
   });
 }
 
+function mergeUnlockedSettings(baseSettings, restoredSettings, locks) {
+  if (!restoredSettings) {
+    return { ...baseSettings };
+  }
+  const merged = { ...baseSettings, ...restoredSettings };
+  for (const [key, locked] of Object.entries(locks || {})) {
+    if (locked && Object.prototype.hasOwnProperty.call(baseSettings, key)) {
+      merged[key] = baseSettings[key];
+    }
+  }
+  return merged;
+}
+
 function guessSize() {
   if (!raw) {
     return;
@@ -230,11 +246,17 @@ function guessSize() {
 }
 
 function syncPackingBitDepth() {
+  const bitDepthLocked = Boolean(lockedFields.bitDepth);
+  const sampleFormatLocked = Boolean(lockedFields.sampleFormat);
+  const endianLocked = Boolean(lockedFields.endian);
+  const packingLocked = Boolean(lockedFields.packing);
   if (controls.packing.value === 'mipi10') {
     controls.bitDepth.value = '10';
     controls.bitDepth.disabled = true;
     controls.sampleFormat.value = 'uint';
     controls.sampleFormat.disabled = true;
+    controls.endian.disabled = endianLocked;
+    controls.packing.disabled = packingLocked;
     return;
   }
   if (controls.packing.value === 'mipi12') {
@@ -242,19 +264,25 @@ function syncPackingBitDepth() {
     controls.bitDepth.disabled = true;
     controls.sampleFormat.value = 'uint';
     controls.sampleFormat.disabled = true;
+    controls.endian.disabled = endianLocked;
+    controls.packing.disabled = packingLocked;
     return;
   }
   if (controls.bitDepth.value === '64') {
     controls.sampleFormat.value = 'float';
     controls.sampleFormat.disabled = true;
-    controls.bitDepth.disabled = false;
+    controls.bitDepth.disabled = bitDepthLocked;
+    controls.endian.disabled = endianLocked;
+    controls.packing.disabled = packingLocked;
     return;
   }
   if (controls.sampleFormat.value === 'float' && !['16', '32', '64'].includes(controls.bitDepth.value)) {
     controls.bitDepth.value = '32';
   }
-  controls.bitDepth.disabled = false;
-  controls.sampleFormat.disabled = false;
+  controls.bitDepth.disabled = bitDepthLocked;
+  controls.sampleFormat.disabled = sampleFormatLocked;
+  controls.endian.disabled = endianLocked;
+  controls.packing.disabled = packingLocked;
 }
 
 function setZoom(value) {

@@ -72,6 +72,9 @@ class RawBayerPreviewProvider {
             name: vscode.workspace.asRelativePath(document.uri),
             byteLength: payload.sourceByteLength,
             settings: { ...initialSettings, ...payload.settings },
+            lockedFields: payload.lockedFields || {},
+            format: payload.format || '',
+            label: payload.label || '',
             buffer: exactArrayBuffer(payload.bytes)
           });
         } catch (error) {
@@ -220,7 +223,10 @@ async function loadPreviewBytes(uri) {
   return {
     bytes,
     sourceByteLength: bytes.byteLength,
-    settings: {}
+    settings: {},
+    lockedFields: {},
+    format: 'file',
+    label: ''
   };
 }
 
@@ -246,16 +252,19 @@ with rawpy.imread(path) as raw:
     color_desc = raw.color_desc.decode("ascii", errors="ignore") if isinstance(raw.color_desc, bytes) else str(raw.color_desc)
     pattern = "".join(color_desc[int(raw.raw_pattern[y, x])][:1] for y in range(2) for x in range(2))
     black_levels = [float(value) for value in raw.black_level_per_channel]
+    white = int(raw.white_level) if raw.white_level is not None else int(image.max())
+    bit_depth = max(1, min(16, int(white).bit_length()))
     metadata = {
         "width": int(image.shape[1]),
         "height": int(image.shape[0]),
         "pattern": pattern if len(pattern) == 4 else "RGGB",
         "black": min(black_levels) if black_levels else 0,
-        "white": float(raw.white_level) if raw.white_level is not None else 0
+        "white": float(white),
+        "bitDepth": int(bit_depth)
     }
 
-image = np.ascontiguousarray(image.astype(np.uint16, copy=False))
-np.save(sys.stdout.buffer, image, allow_pickle=False)
+image = np.ascontiguousarray(image.astype("<u2", copy=False))
+sys.stdout.buffer.write(image.tobytes(order="C"))
 print("RAW_BAYER_PREVIEW_META " + json.dumps(metadata), file=sys.stderr)
 `;
 
@@ -290,13 +299,21 @@ print("RAW_BAYER_PREVIEW_META " + json.dumps(metadata), file=sys.stderr)
           height: metadata.height,
           channels: 1,
           pattern: metadata.pattern,
-          bitDepth: 16,
+          bitDepth: metadata.bitDepth || 16,
           sampleFormat: 'uint',
           endian: 'little',
           packing: 'unpacked',
           black: metadata.black,
           white: metadata.white
-        }
+        },
+        lockedFields: {
+          bitDepth: true,
+          sampleFormat: true,
+          endian: true,
+          packing: true
+        },
+        format: 'cr2',
+        label: `CR2 ${metadata.width}x${metadata.height} ${metadata.bitDepth || 16}-bit`
       });
     });
   });

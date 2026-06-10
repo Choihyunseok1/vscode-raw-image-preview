@@ -551,7 +551,8 @@
           format: 'npy',
           label: `NPY ${npy.descr} ${npy.shape.join('x')}`,
           dataOffset: npy.dataOffset,
-          sourceName: fileName || ''
+          sourceName: fileName || '',
+          lockedFields: headerLockedFields()
         }
       };
     }
@@ -565,7 +566,8 @@
           format: pnm.format,
           label: `${pnm.format.toUpperCase()} ${pnm.width}x${pnm.height} max ${pnm.maxValue}`,
           dataOffset: pnm.dataOffset,
-          sourceName: fileName || ''
+          sourceName: fileName || '',
+          lockedFields: headerLockedFields()
         }
       };
     }
@@ -772,7 +774,7 @@
         width,
         height,
         channels: magic === 'P5' ? 1 : 3,
-        bitDepth: maxValue <= 255 ? 8 : 16,
+        bitDepth: bitDepthForMaxValue(maxValue),
         sampleFormat: 'uint',
         endian: 'big',
         packing: 'unpacked',
@@ -812,6 +814,19 @@
 
   function isWhitespace(byte) {
     return byte === 0x09 || byte === 0x0a || byte === 0x0b || byte === 0x0c || byte === 0x0d || byte === 0x20;
+  }
+
+  function bitDepthForMaxValue(maxValue) {
+    return BIT_DEPTHS.find((bitDepth) => bitDepth <= 16 && maxValue <= Math.pow(2, bitDepth) - 1) || 16;
+  }
+
+  function headerLockedFields() {
+    return {
+      bitDepth: true,
+      sampleFormat: true,
+      endian: true,
+      packing: true
+    };
   }
 
   function guessDimensions(byteLength, settings, fileName) {

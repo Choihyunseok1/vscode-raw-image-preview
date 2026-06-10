@@ -207,6 +207,7 @@ test('NPY HWC array metadata configures an interleaved 4-channel Bayer preview',
   assert.equal(prepared.settings.channels, 4);
   assert.equal(prepared.settings.bitDepth, 8);
   assert.equal(prepared.settings.sampleFormat, 'uint');
+  assert.equal(prepared.metadata.lockedFields.bitDepth, true);
 
   const result = core.renderToRgba(prepared.bytes, prepared.settings);
   assert.equal(result.width, 4);
@@ -303,11 +304,27 @@ test('binary PGM header configures payload offset and image dimensions', () => {
   assert.equal(prepared.settings.width, 2);
   assert.equal(prepared.settings.height, 2);
   assert.equal(prepared.settings.channels, 1);
+  assert.equal(prepared.metadata.lockedFields.bitDepth, true);
   assert.deepEqual([...result.data], [
     0, 0, 0, 255,
     0, 64, 0, 255,
     0, 128, 0, 255,
     0, 0, 255, 255
+  ]);
+});
+
+test('binary PGM max value configures logical bit depth', () => {
+  const pgm = concatBytes(ascii('P5\n1 1\n4095\n'), Uint8Array.of(0x0f, 0xff));
+  const prepared = core.prepareInput(pgm, {
+    pattern: 'RGGB',
+    normalize: false
+  }, 'test12.pgm');
+  const result = core.renderToRgba(prepared.bytes, prepared.settings);
+
+  assert.equal(prepared.settings.bitDepth, 12);
+  assert.equal(prepared.settings.white, 4095);
+  assert.deepEqual([...result.data], [
+    255, 0, 0, 255
   ]);
 });
 
