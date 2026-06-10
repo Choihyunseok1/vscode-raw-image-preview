@@ -2,7 +2,7 @@
   "name": "raw-bayer-preview",
   "displayName": "RAW Bayer Preview",
   "description": "Preview generic RAW image buffers with 4-channel Bayer pixel-shuffle visualization in VS Code.",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "publisher": "personal",
   "icon": "media/icon.png",
   "engines": {
@@ -40,6 +40,54 @@
           },
           {
             "filenamePattern": "*.[cC][rR]2"
+          },
+          {
+            "filenamePattern": "*.nef"
+          },
+          {
+            "filenamePattern": "*.NEF"
+          },
+          {
+            "filenamePattern": "*.[nN][eE][fF]"
+          },
+          {
+            "filenamePattern": "*.arw"
+          },
+          {
+            "filenamePattern": "*.ARW"
+          },
+          {
+            "filenamePattern": "*.[aA][rR][wW]"
+          },
+          {
+            "filenamePattern": "*.[cC][rR]3"
+          },
+          {
+            "filenamePattern": "*.[nN][rR][wW]"
+          },
+          {
+            "filenamePattern": "*.[sS][rR][fF]"
+          },
+          {
+            "filenamePattern": "*.[sS][rR]2"
+          },
+          {
+            "filenamePattern": "*.[dD][nN][gG]"
+          },
+          {
+            "filenamePattern": "*.[rR][aA][fF]"
+          },
+          {
+            "filenamePattern": "*.[rR][wW]2"
+          },
+          {
+            "filenamePattern": "*.[oO][rR][fF]"
+          },
+          {
+            "filenamePattern": "*.[pP][eE][fF]"
+          },
+          {
+            "filenamePattern": "*.[sS][rR][wW]"
           },
           {
             "filenamePattern": "*.bin"

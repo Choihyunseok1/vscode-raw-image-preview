@@ -216,8 +216,8 @@ function getNonce() {
 }
 
 async function loadPreviewBytes(uri) {
-  if (uri.scheme === 'file' && isCr2Path(uri.fsPath)) {
-    return convertCr2ToNpy(uri.fsPath);
+  if (uri.scheme === 'file' && isCameraRawPath(uri.fsPath)) {
+    return convertCameraRawToBuffer(uri.fsPath);
   }
   const bytes = await vscode.workspace.fs.readFile(uri);
   return {
@@ -230,11 +230,11 @@ async function loadPreviewBytes(uri) {
   };
 }
 
-function isCr2Path(filePath) {
-  return /\.cr2$/i.test(filePath);
+function isCameraRawPath(filePath) {
+  return /\.(cr2|cr3|nef|nrw|arw|srf|sr2|dng|raf|rw2|orf|pef|srw)$/i.test(filePath);
 }
 
-function convertCr2ToNpy(filePath) {
+function convertCameraRawToBuffer(filePath) {
   const script = `
 import json
 import sys
@@ -287,7 +287,7 @@ print("RAW_BAYER_PREVIEW_META " + json.dumps(metadata), file=sys.stderr)
     child.on('error', reject);
     child.on('close', (code) => {
       if (code !== 0) {
-        reject(new Error(cr2ErrorMessage(stderrText)));
+        reject(new Error(cameraRawErrorMessage(stderrText)));
         return;
       }
       const metadata = parseCr2Metadata(stderrText);
@@ -307,13 +307,17 @@ print("RAW_BAYER_PREVIEW_META " + json.dumps(metadata), file=sys.stderr)
           white: metadata.white
         },
         lockedFields: {
+          width: true,
+          height: true,
+          channels: true,
+          pattern: true,
           bitDepth: true,
           sampleFormat: true,
           endian: true,
           packing: true
         },
-        format: 'cr2',
-        label: `CR2 ${metadata.width}x${metadata.height} ${metadata.bitDepth || 16}-bit`
+        format: 'camera-raw',
+        label: `${cameraRawExtension(filePath)} ${metadata.width}x${metadata.height} ${metadata.bitDepth || 16}-bit`
       });
     });
   });
@@ -333,12 +337,17 @@ function parseCr2Metadata(stderrText) {
   }
 }
 
-function cr2ErrorMessage(stderrText) {
+function cameraRawErrorMessage(stderrText) {
   const line = stderrText
     .split(/\r?\n/)
     .find((entry) => entry.startsWith('RAW_BAYER_PREVIEW_ERROR '));
   const detail = line ? line.slice('RAW_BAYER_PREVIEW_ERROR '.length) : stderrText.trim();
-  return `Failed to decode CR2. Install Python rawpy/numpy for CR2 support. ${detail}`;
+  return `Failed to decode camera RAW. Install Python rawpy/numpy for camera RAW support. ${detail}`;
+}
+
+function cameraRawExtension(filePath) {
+  const match = String(filePath || '').match(/\.([^.]+)$/);
+  return match ? match[1].toUpperCase() : 'Camera RAW';
 }
 
 function exactArrayBuffer(bytes) {

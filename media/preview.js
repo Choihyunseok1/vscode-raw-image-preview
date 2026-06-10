@@ -68,7 +68,7 @@ window.addEventListener('message', (event) => {
   lockedFields = { ...lockedFields, ...(prepared.metadata.lockedFields || {}) };
   const settings = prepared.settings;
   const expected = renderCore.expectedBytes(settings);
-  const rawGuess = prepared.metadata.format === 'raw' && message.format !== 'cr2'
+  const rawGuess = prepared.metadata.format === 'raw' && message.format !== 'camera-raw'
     ? renderCore.guessRawSettings(raw, settings, message.name)
     : null;
   if (rawGuess && (!restoredSettings || expected !== raw.byteLength)) {
@@ -129,6 +129,7 @@ function applySettings(settings) {
   controls.black.value = normalized.black;
   controls.white.value = normalized.white;
   controls.gain.value = normalized.gain;
+  syncLockedControls();
   syncPackingBitDepth();
 }
 
@@ -283,6 +284,15 @@ function syncPackingBitDepth() {
   controls.sampleFormat.disabled = sampleFormatLocked;
   controls.endian.disabled = endianLocked;
   controls.packing.disabled = packingLocked;
+  syncLockedControls();
+}
+
+function syncLockedControls() {
+  controls.width.disabled = Boolean(lockedFields.width);
+  controls.height.disabled = Boolean(lockedFields.height);
+  controls.channels.disabled = Boolean(lockedFields.channels);
+  controls.pattern.disabled = Boolean(lockedFields.pattern);
+  controls.channelOrder.disabled = Boolean(lockedFields.channelOrder);
 }
 
 function setZoom(value) {

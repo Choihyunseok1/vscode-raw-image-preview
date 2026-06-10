@@ -344,6 +344,48 @@ test('raw settings inference recognizes padded 24-bit common dimensions', () => 
   assert.equal(guessed.bitDepth, 24);
 });
 
+test('raw settings inference prefers 3-byte integer samples over RGB when high byte is small', () => {
+  const bytes = new Uint8Array(2784 * 1920 * 3);
+  for (let offset = 0; offset < bytes.length; offset += 3) {
+    bytes[offset] = 0xd1;
+    bytes[offset + 1] = 0x13;
+    bytes[offset + 2] = 0x02;
+  }
+  const guessed = core.guessRawSettings(bytes, {
+    width: 1920,
+    height: 1080,
+    channels: 4,
+    bitDepth: 8,
+    packing: 'unpacked'
+  }, 'day.raw');
+
+  assert.equal(guessed.width, 2784);
+  assert.equal(guessed.height, 1920);
+  assert.equal(guessed.channels, 1);
+  assert.equal(guessed.bitDepth, 24);
+});
+
+test('raw settings inference overrides ambiguous RGB state for 3-byte integer samples', () => {
+  const bytes = new Uint8Array(2784 * 1920 * 3);
+  for (let offset = 0; offset < bytes.length; offset += 3) {
+    bytes[offset] = 0x65;
+    bytes[offset + 1] = 0x00;
+    bytes[offset + 2] = 0x00;
+  }
+  const guessed = core.guessRawSettings(bytes, {
+    width: 2784,
+    height: 1920,
+    channels: 3,
+    bitDepth: 8,
+    packing: 'unpacked'
+  }, 'night.raw');
+
+  assert.equal(guessed.width, 2784);
+  assert.equal(guessed.height, 1920);
+  assert.equal(guessed.channels, 1);
+  assert.equal(guessed.bitDepth, 24);
+});
+
 function packMipi10(samples) {
   return Uint8Array.of(
     samples[0] >> 2,

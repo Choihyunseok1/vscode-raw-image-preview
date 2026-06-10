@@ -822,6 +822,9 @@
 
   function headerLockedFields() {
     return {
+      width: true,
+      height: true,
+      channels: true,
       bitDepth: true,
       sampleFormat: true,
       endian: true,
@@ -875,12 +878,17 @@
       return { ...normalized, width: byName.width, height: byName.height };
     }
 
+    const candidates = rawLayoutCandidates(bytes, normalized);
+    const preferredThreeByte = candidates.find((candidate) => candidate.kind === 'three-byte-integer');
+    if (preferredThreeByte) {
+      return preferredThreeByte.settings;
+    }
+
     const currentExpected = expectedBytes(normalized);
     if (currentExpected === bytes.byteLength) {
       return normalized;
     }
 
-    const candidates = rawLayoutCandidates(bytes, normalized);
     return candidates.length ? candidates[0].settings : null;
   }
 
@@ -917,6 +925,7 @@
         }
         candidates.push({
           score,
+          kind: preferred24 && bitDepth === 24 && channels === 1 ? 'three-byte-integer' : 'generic',
           settings: {
             ...settings,
             width: dimensions.width,
@@ -964,14 +973,18 @@
     const stride = Math.max(1, Math.floor(samples / 20000));
     let checked = 0;
     let highByteZero = 0;
+    let highByteSmall = 0;
     for (let sample = 0; sample < samples; sample += stride) {
       const offset = sample * 3;
       if (bytes[offset + 2] === 0) {
         highByteZero += 1;
       }
+      if (bytes[offset + 2] <= 0x0f) {
+        highByteSmall += 1;
+      }
       checked += 1;
     }
-    return checked > 0 && highByteZero / checked > 0.95;
+    return checked > 0 && (highByteZero / checked > 0.95 || highByteSmall / checked > 0.95);
   }
 
   function pixelCountFromBytes(byteLength, settings) {

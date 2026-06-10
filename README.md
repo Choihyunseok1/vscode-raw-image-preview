@@ -6,7 +6,7 @@ VS Code extension for previewing generic RAW image buffers in an interactive web
 
 - Opens RAW-like binary files inside a VS Code custom editor.
 - Supports 1-channel Bayer mosaic, 3-channel RGB, and 4-channel Bayer pixel-shuffle layouts.
-- Supports Canon `.CR2` preview through local Python `rawpy`/`numpy` conversion when those packages are installed.
+- Supports camera RAW preview (`.CR2`, `.NEF`, `.ARW`, and other common rawpy-readable formats) through local Python `rawpy`/`numpy` conversion when those packages are installed.
 - Configurable Bayer patterns: `RGGB`, `BGGR`, `GRBG`, `GBRG`.
 - Configurable 4-channel order, so buffers stored as `RGGB`, `BGGR`, `GRBG`, or `GBRG` can be shuffled into the selected Bayer pattern.
 - View modes for the full Bayer mosaic or individual `R`, `G1`, `G2`, and `B` planes.
@@ -40,7 +40,7 @@ Header-aware formats:
 
 - `.npy`: supports 2D grayscale/Bayer, HWC, CHW, single-batch NHWC/NCHW arrays with `uint8`, `uint16`, `uint32`, `int8`, `int16`, `int32`, `float16`, `float32`, and `float64` dtypes.
 - `.pgm`, `.ppm`, `.pnm`: supports binary `P5` and `P6`.
-- `.cr2`: uses the VS Code extension host to run Python `rawpy` and converts the camera RAW mosaic to an in-memory uint16 Bayer buffer. If Python `rawpy` or `numpy` is missing, the extension reports that dependency error instead of rendering the CR2 header as pixels.
+- Camera RAW such as `.cr2`, `.nef`, and `.arw`: uses the VS Code extension host to run Python `rawpy` and converts the camera RAW mosaic to an in-memory uint16 Bayer buffer. If Python `rawpy` or `numpy` is missing, the extension reports that dependency error instead of rendering camera RAW headers as pixels.
 
 For header-aware formats, bit depth, sample type, endian, and packing are read from the file and locked in the UI. Generic headerless RAW buffers keep those controls editable.
 
