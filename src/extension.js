@@ -1,0 +1,182 @@
+const vscode = require('vscode');
+
+const VIEW_TYPE = 'rawBayerPreview.viewer';
+
+function activate(context) {
+  const provider = new RawBayerPreviewProvider(context);
+
+  context.subscriptions.push(
+    vscode.window.registerCustomEditorProvider(VIEW_TYPE, provider, {
+      webviewOptions: { retainContextWhenHidden: true },
+      supportsMultipleEditorsPerDocument: false
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('rawBayerPreview.openPreview', async (uri) => {
+      const target = uri || vscode.window.activeTextEditor?.document?.uri;
+      if (!target) {
+        vscode.window.showWarningMessage('Open or select a RAW file first.');
+        return;
+      }
+      await vscode.commands.executeCommand('vscode.openWith', target, VIEW_TYPE);
+    })
+  );
+}
+
+class RawBayerPreviewProvider {
+  constructor(context) {
+    this.context = context;
+  }
+
+  async openCustomDocument(uri) {
+    return { uri, dispose: () => {} };
+  }
+
+  async resolveCustomEditor(document, webviewPanel) {
+    const webview = webviewPanel.webview;
+    webview.options = {
+      enableScripts: true,
+      localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
+    };
+
+    webview.html = this.getHtml(webview);
+
+    const fileBytes = await vscode.workspace.fs.readFile(document.uri);
+    const config = vscode.workspace.getConfiguration('rawBayerPreview');
+    const initialSettings = {
+      width: config.get('defaultWidth', 1920),
+      height: config.get('defaultHeight', 1080),
+      channels: config.get('defaultChannels', 4),
+      pattern: config.get('defaultBayerPattern', 'RGGB'),
+      channelOrder: config.get('defaultChannelOrder', 'RGGB'),
+      bitDepth: config.get('defaultBitDepth', 8),
+      endian: config.get('defaultEndian', 'little'),
+      packing: 'unpacked',
+      black: 0,
+      white: 0,
+      gain: 1,
+      normalize: true
+    };
+
+    webview.onDidReceiveMessage(async (message) => {
+      if (message?.type === 'ready') {
+        webview.postMessage({
+          type: 'file',
+          name: vscode.workspace.asRelativePath(document.uri),
+          byteLength: fileBytes.byteLength,
+          settings: initialSettings,
+          buffer: fileBytes.buffer
+        });
+      }
+    });
+  }
+
+  getHtml(webview) {
+    const nonce = getNonce();
+    const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'preview.css'));
+    const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'preview.js'));
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+  <link href="${cssUri}" rel="stylesheet">
+  <title>RAW Bayer Preview</title>
+</head>
+<body>
+  <main class="app">
+    <aside class="sidebar">
+      <div class="file">
+        <strong id="fileName">RAW Preview</strong>
+        <span id="fileMeta">Waiting for file...</span>
+      </div>
+      <label>Width <input id="width" type="number" min="1" step="1"></label>
+      <label>Height <input id="height" type="number" min="1" step="1"></label>
+      <label>Channels
+        <select id="channels">
+          <option value="1">1 channel</option>
+          <option value="3">3 channels</option>
+          <option value="4">4 channels Bayer shuffle</option>
+        </select>
+      </label>
+      <label>Bayer Pattern
+        <select id="pattern">
+          <option>RGGB</option>
+          <option>BGGR</option>
+          <option>GRBG</option>
+          <option>GBRG</option>
+        </select>
+      </label>
+      <label>4-channel Order
+        <select id="channelOrder">
+          <option>RGGB</option>
+          <option>BGGR</option>
+          <option>GRBG</option>
+          <option>GBRG</option>
+        </select>
+      </label>
+      <label>Bit Depth
+        <select id="bitDepth">
+          <option value="8">8-bit</option>
+          <option value="10">10-bit</option>
+          <option value="12">12-bit</option>
+          <option value="14">14-bit</option>
+          <option value="16">16-bit</option>
+          <option value="32">32-bit float</option>
+        </select>
+      </label>
+      <label>Endian
+        <select id="endian">
+          <option value="little">Little endian</option>
+          <option value="big">Big endian</option>
+        </select>
+      </label>
+      <label>Packing
+        <select id="packing">
+          <option value="unpacked">Unpacked samples</option>
+          <option value="mipi10">MIPI RAW10 packed</option>
+          <option value="mipi12">MIPI RAW12 packed</option>
+        </select>
+      </label>
+      <label class="check"><input id="normalize" type="checkbox"> Auto normalize</label>
+      <label>Black <input id="black" type="number" min="0" step="1"></label>
+      <label>White <input id="white" type="number" min="0" step="1"></label>
+      <label>Gain <input id="gain" type="range" min="0.1" max="8" step="0.1"></label>
+      <div class="actions">
+        <button id="render">Render</button>
+        <button id="fit">Fit</button>
+        <button id="oneToOne">1:1</button>
+      </div>
+      <div id="status" class="status">Idle</div>
+    </aside>
+    <section class="viewer">
+      <div class="toolbar">
+        <button id="zoomOut" title="Zoom out">-</button>
+        <input id="zoom" type="range" min="5" max="800" value="100">
+        <button id="zoomIn" title="Zoom in">+</button>
+        <span id="zoomLabel">100%</span>
+      </div>
+      <div id="stage" class="stage">
+        <canvas id="canvas"></canvas>
+      </div>
+    </section>
+  </main>
+  <script nonce="${nonce}" src="${jsUri}"></script>
+</body>
+</html>`;
+  }
+}
+
+function getNonce() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let text = '';
+  for (let i = 0; i < 32; i += 1) {
+    text += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return text;
+}
+
+module.exports = { activate };

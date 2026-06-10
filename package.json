@@ -1,0 +1,174 @@
+{
+  "name": "raw-bayer-preview",
+  "displayName": "RAW Bayer Preview",
+  "description": "Preview generic RAW image buffers with 4-channel Bayer pixel-shuffle visualization in VS Code.",
+  "version": "0.1.0",
+  "publisher": "personal",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "activationEvents": [
+    "onCustomEditor:rawBayerPreview.viewer",
+    "onCommand:rawBayerPreview.openPreview"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "rawBayerPreview.openPreview",
+        "title": "RAW Bayer Preview: Open Preview"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "rawBayerPreview.viewer",
+        "displayName": "RAW Bayer Preview",
+        "selector": [
+          {
+            "filenamePattern": "*.raw"
+          },
+          {
+            "filenamePattern": "*.bin"
+          },
+          {
+            "filenamePattern": "*.dat"
+          },
+          {
+            "filenamePattern": "*.rggb"
+          },
+          {
+            "filenamePattern": "*.bggr"
+          },
+          {
+            "filenamePattern": "*.grbg"
+          },
+          {
+            "filenamePattern": "*.gbrg"
+          },
+          {
+            "filenamePattern": "*.bayer"
+          },
+          {
+            "filenamePattern": "*.mipi"
+          },
+          {
+            "filenamePattern": "*.raw10"
+          },
+          {
+            "filenamePattern": "*.raw12"
+          },
+          {
+            "filenamePattern": "*.gray"
+          },
+          {
+            "filenamePattern": "*.rgb"
+          }
+        ],
+        "priority": "option"
+      }
+    ],
+    "configuration": {
+      "title": "RAW Bayer Preview",
+      "properties": {
+        "rawBayerPreview.defaultWidth": {
+          "type": "number",
+          "default": 1920,
+          "minimum": 1,
+          "description": "Default RAW image width."
+        },
+        "rawBayerPreview.defaultHeight": {
+          "type": "number",
+          "default": 1080,
+          "minimum": 1,
+          "description": "Default RAW image height."
+        },
+        "rawBayerPreview.defaultChannels": {
+          "type": "number",
+          "default": 4,
+          "enum": [
+            1,
+            3,
+            4
+          ],
+          "description": "Default channel count in the RAW buffer."
+        },
+        "rawBayerPreview.defaultBayerPattern": {
+          "type": "string",
+          "default": "RGGB",
+          "enum": [
+            "RGGB",
+            "BGGR",
+            "GRBG",
+            "GBRG"
+          ],
+          "description": "Default Bayer pattern for 4-channel pixel-shuffle visualization."
+        },
+        "rawBayerPreview.defaultChannelOrder": {
+          "type": "string",
+          "default": "RGGB",
+          "enum": [
+            "RGGB",
+            "BGGR",
+            "GRBG",
+            "GBRG"
+          ],
+          "description": "Default channel order for 4-channel RAW buffers before Bayer pixel shuffle."
+        },
+        "rawBayerPreview.defaultBitDepth": {
+          "type": "number",
+          "default": 8,
+          "enum": [
+            8,
+            10,
+            12,
+            14,
+            16,
+            32
+          ],
+          "description": "Default sample bit depth."
+        },
+        "rawBayerPreview.defaultEndian": {
+          "type": "string",
+          "default": "little",
+          "enum": [
+            "little",
+            "big"
+          ],
+          "description": "Default byte order for samples wider than 8 bits."
+        }
+      }
+    },
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "rawBayerPreview.openPreview",
+          "when": "resourceExtname =~ /\\.(raw|bin|dat|rggb|bggr|grbg|gbrg|bayer|mipi|raw10|raw12|gray|rgb)$/i",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "rawBayerPreview.openPreview",
+          "when": "resourceExtname =~ /\\.(raw|bin|dat|rggb|bggr|grbg|gbrg|bayer|mipi|raw10|raw12|gray|rgb)$/i",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Choihyunseok1/raw-bayer-preview.git"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@vscode/vsce": "^3.0.0"
+  },
+  "scripts": {
+    "package": "vsce package",
+    "publish:local": "vsce package"
+  }
+}
