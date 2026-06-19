@@ -380,14 +380,14 @@
 
   function fillPreview(out, samples, settings, black, scale) {
     if (settings.channels === 4) {
-      fillFourChannelGray(out, samples, settings, black, scale);
+      fillFourChannelTint(out, samples, settings, black, scale);
       return;
     }
     if (settings.channels === 3) {
       fillRgb(out, samples, settings, black, scale);
       return;
     }
-    fillGrayMosaic(out, samples, settings, black, scale);
+    fillBayerTintMosaic(out, samples, settings, black, scale);
   }
 
   function renderToRgba(inputBytes, settings, output) {
@@ -444,6 +444,26 @@
           const outputPixel = outputY * outputWidth + outputX;
           const value = toByte(samples(pixel * 4 + channelForPosition[position]), black, scale, settings.gain);
           writeGrayPixel(out, outputPixel * 4, value);
+        }
+      }
+    }
+  }
+
+  function fillFourChannelTint(out, samples, settings, black, scale) {
+    const channelForPosition = fourChannelShuffleMap(settings.pattern, settings.channelOrder);
+    const pattern = settings.pattern;
+    const outputWidth = settings.width * 2;
+    for (let y = 0; y < settings.height; y += 1) {
+      const row = y * settings.width;
+      for (let x = 0; x < settings.width; x += 1) {
+        const pixel = row + x;
+        for (let position = 0; position < 4; position += 1) {
+          const outputX = x * 2 + (position & 1);
+          const outputY = y * 2 + (position >> 1);
+          const outputPixel = outputY * outputWidth + outputX;
+          const color = pattern[position] || 'G';
+          const value = toByte(samples(pixel * 4 + channelForPosition[position]), black, scale, settings.gain);
+          writeBayerTintPixel(out, outputPixel * 4, color, value);
         }
       }
     }
@@ -514,10 +534,30 @@
     }
   }
 
+  function fillBayerTintMosaic(out, samples, settings, black, scale) {
+    const pattern = settings.pattern;
+    for (let y = 0; y < settings.height; y += 1) {
+      const row = y * settings.width;
+      for (let x = 0; x < settings.width; x += 1) {
+        const pixel = row + x;
+        const value = toByte(samples(pixel), black, scale, settings.gain);
+        writeBayerTintPixel(out, pixel * 4, pattern[(y & 1) * 2 + (x & 1)] || 'G', value);
+      }
+    }
+  }
+
   function writeBayerPixel(out, offset, color, value) {
     out[offset] = color === 'R' ? value : 0;
     out[offset + 1] = color === 'G' ? value : 0;
     out[offset + 2] = color === 'B' ? value : 0;
+    out[offset + 3] = 255;
+  }
+
+  function writeBayerTintPixel(out, offset, color, value) {
+    const floor = Math.round(value * 0.55);
+    out[offset] = color === 'R' ? value : floor;
+    out[offset + 1] = color === 'G' ? value : floor;
+    out[offset + 2] = color === 'B' ? value : floor;
     out[offset + 3] = 255;
   }
 
@@ -1000,10 +1040,16 @@
     let score = dimensions.source === 'common-size' ? 0 : 20;
     if (layout.packing === 'mipi12') {
       score -= 16;
+      if (preferred24) {
+        score += 24;
+      }
     } else if (layout.packing === 'mipi10') {
       score -= 12;
+      if (preferred24) {
+        score += 18;
+      }
     } else if (preferred24 && layout.bitDepth === 24 && channels === 1) {
-      score -= 4;
+      score -= 28;
     } else if (!preferred24 && layout.bitDepth === 8 && channels === 3) {
       score -= 2;
     }
@@ -1108,6 +1154,7 @@
       { width: 2048, height: 1080 },
       { width: 2048, height: 1536 },
       { width: 2592, height: 1944 },
+      { width: 2880, height: 1856 },
       { width: 2784, height: 1920 },
       { width: 5760, height: 1856 },
       { width: 3840, height: 2784 },

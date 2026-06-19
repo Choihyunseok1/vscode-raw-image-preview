@@ -127,7 +127,7 @@ test('1-channel Bayer plane view extracts the selected CFA positions', () => {
   ]);
 });
 
-test('1-channel image preview renders grayscale without CFA color tint', () => {
+test('1-channel image preview keeps Bayer tint visible', () => {
   const bytes = Uint8Array.of(10, 20, 30, 40);
   const result = core.renderToRgba(bytes, {
     width: 2,
@@ -145,10 +145,10 @@ test('1-channel image preview renders grayscale without CFA color tint', () => {
   assert.equal(result.width, 2);
   assert.equal(result.height, 2);
   assert.deepEqual([...result.data], [
-    10, 10, 10, 255,
-    20, 20, 20, 255,
-    30, 30, 30, 255,
-    40, 40, 40, 255
+    10, 6, 6, 255,
+    11, 20, 11, 255,
+    17, 30, 17, 255,
+    22, 22, 40, 255
   ]);
 });
 
@@ -382,7 +382,7 @@ test('raw settings inference prefers RAW12 packed for sensor-sized buffers', () 
   for (let offset = 0; offset < bytes.length; offset += 3) {
     bytes[offset] = 0xd1;
     bytes[offset + 1] = 0x13;
-    bytes[offset + 2] = 0x02;
+    bytes[offset + 2] = 0xf2;
   }
   const guessed = core.guessRawSettings(bytes, {
     width: 1920,
@@ -400,11 +400,11 @@ test('raw settings inference prefers RAW12 packed for sensor-sized buffers', () 
   assert.equal(guessed.endian, 'little');
 });
 
-test('raw settings inference overrides stale 24-bit state for RAW12 packed buffers', () => {
+test('raw settings inference prefers padded 24-bit samples when third byte is unused', () => {
   const bytes = new Uint8Array(3840 * 2784 * 3 / 2);
   for (let offset = 0; offset < bytes.length; offset += 3) {
     bytes[offset] = 0x65;
-    bytes[offset + 1] = 0x00;
+    bytes[offset + 1] = 0x12;
     bytes[offset + 2] = 0x00;
   }
   const guessed = core.guessRawSettings(bytes, {
@@ -415,11 +415,12 @@ test('raw settings inference overrides stale 24-bit state for RAW12 packed buffe
     packing: 'unpacked'
   }, 'night.raw');
 
-  assert.equal(guessed.width, 5760);
+  assert.equal(guessed.width, 2880);
   assert.equal(guessed.height, 1856);
   assert.equal(guessed.channels, 1);
-  assert.equal(guessed.bitDepth, 12);
-  assert.equal(guessed.packing, 'mipi12');
+  assert.equal(guessed.bitDepth, 24);
+  assert.equal(guessed.packing, 'unpacked');
+  assert.equal(guessed.endian, 'little');
 });
 
 function packMipi10(samples) {
