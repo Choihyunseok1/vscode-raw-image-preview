@@ -49,7 +49,7 @@ class RawBayerPreviewProvider {
       width: config.get('defaultWidth', 1920),
       height: config.get('defaultHeight', 1080),
       channels: config.get('defaultChannels', 4),
-      displayMode: 'mosaic',
+      displayMode: 'preview',
       pattern: config.get('defaultBayerPattern', 'RGGB'),
       channelOrder: config.get('defaultChannelOrder', 'RGGB'),
       bitDepth: config.get('defaultBitDepth', 8),
@@ -120,6 +120,7 @@ class RawBayerPreviewProvider {
       </label>
       <label>View
         <select id="displayMode">
+          <option value="preview">Image preview</option>
           <option value="mosaic">Bayer mosaic</option>
           <option value="r">R plane</option>
           <option value="g1">G1 plane</option>

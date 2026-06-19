@@ -12,7 +12,7 @@
   const BIT_DEPTHS = [8, 10, 12, 14, 16, 24, 32, 64];
   const CHANNELS = [1, 3, 4];
   const SAMPLE_FORMATS = ['uint', 'int', 'float'];
-  const DISPLAY_MODES = ['mosaic', 'r', 'g1', 'g2', 'b'];
+  const DISPLAY_MODES = ['preview', 'mosaic', 'r', 'g1', 'g2', 'b'];
   const MAX_PIXELS = 120000000;
 
   function normalizeSettings(settings) {
@@ -278,13 +278,16 @@
 
   function displaySampleCount(settings) {
     const dimensions = outputDimensions(settings);
-    if (settings.displayMode === 'mosaic' && settings.channels === 3) {
+    if ((settings.displayMode === 'preview' || settings.displayMode === 'mosaic') && settings.channels === 3) {
       return dimensions.width * dimensions.height * 3;
     }
     return dimensions.width * dimensions.height;
   }
 
   function displaySampleIndex(visibleIndex, settings) {
+    if (settings.displayMode === 'preview') {
+      return previewSampleIndex(visibleIndex, settings);
+    }
     if (settings.displayMode !== 'mosaic') {
       return planeSampleIndex(visibleIndex, settings);
     }
@@ -353,6 +356,11 @@
     const normalized = normalizeSettings(settings);
     const scale = 255 / Math.max(1e-9, range.white - range.black);
 
+    if (normalized.displayMode === 'preview') {
+      fillPreview(out, samples, normalized, range.black, scale);
+      return out;
+    }
+
     if (normalized.displayMode !== 'mosaic') {
       fillPlane(out, samples, normalized, range.black, scale);
       return out;
@@ -368,6 +376,18 @@
     }
     fillBayerMosaic(out, samples, normalized, range.black, scale);
     return out;
+  }
+
+  function fillPreview(out, samples, settings, black, scale) {
+    if (settings.channels === 4) {
+      fillFourChannelGray(out, samples, settings, black, scale);
+      return;
+    }
+    if (settings.channels === 3) {
+      fillRgb(out, samples, settings, black, scale);
+      return;
+    }
+    fillGrayMosaic(out, samples, settings, black, scale);
   }
 
   function renderToRgba(inputBytes, settings, output) {
@@ -406,6 +426,24 @@
           const color = pattern[position] || 'G';
           const value = toByte(samples(pixel * 4 + channelForPosition[position]), black, scale, settings.gain);
           writeBayerPixel(out, outputPixel * 4, color, value);
+        }
+      }
+    }
+  }
+
+  function fillFourChannelGray(out, samples, settings, black, scale) {
+    const channelForPosition = fourChannelShuffleMap(settings.pattern, settings.channelOrder);
+    const outputWidth = settings.width * 2;
+    for (let y = 0; y < settings.height; y += 1) {
+      const row = y * settings.width;
+      for (let x = 0; x < settings.width; x += 1) {
+        const pixel = row + x;
+        for (let position = 0; position < 4; position += 1) {
+          const outputX = x * 2 + (position & 1);
+          const outputY = y * 2 + (position >> 1);
+          const outputPixel = outputY * outputWidth + outputX;
+          const value = toByte(samples(pixel * 4 + channelForPosition[position]), black, scale, settings.gain);
+          writeGrayPixel(out, outputPixel * 4, value);
         }
       }
     }
@@ -483,6 +521,14 @@
     out[offset + 3] = 255;
   }
 
+  function fillGrayMosaic(out, samples, settings, black, scale) {
+    const pixels = settings.width * settings.height;
+    for (let pixel = 0; pixel < pixels; pixel += 1) {
+      const value = toByte(samples(pixel), black, scale, settings.gain);
+      writeGrayPixel(out, pixel * 4, value);
+    }
+  }
+
   function writeGrayPixel(out, offset, value) {
     out[offset] = value;
     out[offset + 1] = value;
@@ -513,6 +559,20 @@
       return null;
     }
     return sourceY * settings.width + sourceX;
+  }
+
+  function previewSampleIndex(visibleIndex, settings) {
+    if (settings.channels === 4) {
+      const outputWidth = settings.width * 2;
+      const outputX = visibleIndex % outputWidth;
+      const outputY = Math.floor(visibleIndex / outputWidth);
+      const sourceX = Math.floor(outputX / 2);
+      const sourceY = Math.floor(outputY / 2);
+      const position = (outputY & 1) * 2 + (outputX & 1);
+      const channelForPosition = fourChannelShuffleMap(settings.pattern, settings.channelOrder);
+      return (sourceY * settings.width + sourceX) * 4 + channelForPosition[position];
+    }
+    return visibleIndex;
   }
 
   function planePosition(displayMode, pattern) {
@@ -1049,7 +1109,7 @@
       { width: 2048, height: 1536 },
       { width: 2592, height: 1944 },
       { width: 2784, height: 1920 },
-      { width: 2880, height: 3712 },
+      { width: 5760, height: 1856 },
       { width: 3840, height: 2784 },
       { width: 3840, height: 2160 },
       { width: 4096, height: 2160 },
@@ -1149,6 +1209,18 @@
 
   function outputDimensions(settings) {
     const normalized = normalizeSettings(settings);
+    if (normalized.displayMode === 'preview') {
+      if (normalized.channels === 4) {
+        return {
+          width: normalized.width * 2,
+          height: normalized.height * 2
+        };
+      }
+      return {
+        width: normalized.width,
+        height: normalized.height
+      };
+    }
     if (normalized.displayMode !== 'mosaic') {
       if (normalized.channels === 1) {
         const position = planePosition(normalized.displayMode, normalized.pattern);

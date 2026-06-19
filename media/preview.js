@@ -74,11 +74,13 @@ window.addEventListener('message', (event) => {
     : null;
   if (rawGuess) {
     Object.assign(settings, rawGuess, {
+      displayMode: 'preview',
       normalize: true,
       black: 0,
       white: 0
     });
   }
+  settings.displayMode = 'preview';
 
   applySettings(settings);
   controls.fileName.textContent = message.name;

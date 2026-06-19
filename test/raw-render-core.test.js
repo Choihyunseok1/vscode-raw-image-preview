@@ -127,6 +127,31 @@ test('1-channel Bayer plane view extracts the selected CFA positions', () => {
   ]);
 });
 
+test('1-channel image preview renders grayscale without CFA color tint', () => {
+  const bytes = Uint8Array.of(10, 20, 30, 40);
+  const result = core.renderToRgba(bytes, {
+    width: 2,
+    height: 2,
+    channels: 1,
+    displayMode: 'preview',
+    bitDepth: 8,
+    packing: 'unpacked',
+    normalize: false,
+    black: 0,
+    white: 255,
+    gain: 1
+  });
+
+  assert.equal(result.width, 2);
+  assert.equal(result.height, 2);
+  assert.deepEqual([...result.data], [
+    10, 10, 10, 255,
+    20, 20, 20, 255,
+    30, 30, 30, 255,
+    40, 40, 40, 255
+  ]);
+});
+
 test('MIPI RAW10 packed samples are unpacked correctly', () => {
   const packed = packMipi10([0, 1, 2, 1023]);
   const read = core.makeSampleReader(packed, { packing: 'mipi10' });
@@ -367,8 +392,8 @@ test('raw settings inference prefers RAW12 packed for sensor-sized buffers', () 
     packing: 'unpacked'
   }, 'day.raw');
 
-  assert.equal(guessed.width, 2880);
-  assert.equal(guessed.height, 3712);
+  assert.equal(guessed.width, 5760);
+  assert.equal(guessed.height, 1856);
   assert.equal(guessed.channels, 1);
   assert.equal(guessed.bitDepth, 12);
   assert.equal(guessed.packing, 'mipi12');
@@ -390,8 +415,8 @@ test('raw settings inference overrides stale 24-bit state for RAW12 packed buffe
     packing: 'unpacked'
   }, 'night.raw');
 
-  assert.equal(guessed.width, 2880);
-  assert.equal(guessed.height, 3712);
+  assert.equal(guessed.width, 5760);
+  assert.equal(guessed.height, 1856);
   assert.equal(guessed.channels, 1);
   assert.equal(guessed.bitDepth, 12);
   assert.equal(guessed.packing, 'mipi12');
