@@ -54,6 +54,8 @@ For camera RAW files, VS Code asks Python to decode the sensor mosaic with `rawp
 python -m pip install rawpy numpy
 ```
 
+The extension tries `python3`/`python` automatically on macOS and Linux, and `py -3`/`python`/`python3` on Windows. If VS Code uses a different Python, set `rawBayerPreview.pythonPath` to the executable path.
+
 `.npz` is intentionally not opened yet because it is a ZIP container that can hold multiple compressed arrays.
 
 ## Development

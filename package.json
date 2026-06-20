@@ -2,11 +2,11 @@
   "name": "raw-bayer-preview",
   "displayName": "[VSCode Extension] RAW image preview",
   "description": "Preview RAW/Bayer image buffers with bit-depth, Bayer pattern, and channel-plane controls in VS Code.",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "publisher": "personal",
   "icon": "media/icon.png",
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.80.0"
   },
   "categories": [
     "Visualization",
@@ -191,7 +191,7 @@
         },
         "rawBayerPreview.defaultChannels": {
           "type": "number",
-          "default": 4,
+          "default": 1,
           "enum": [
             1,
             3,
@@ -254,6 +254,11 @@
             "big"
           ],
           "description": "Default byte order for samples wider than 8 bits."
+        },
+        "rawBayerPreview.pythonPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional Python executable for camera RAW decoding. Leave blank to try python3/python automatically."
         }
       }
     },
@@ -288,7 +293,7 @@
   },
   "scripts": {
     "test": "node --test test/*.test.js",
-    "check": "npm test && vsce package",
+    "check": "npm test && npm run package",
     "package": "vsce package",
     "publish:local": "vsce package"
   }

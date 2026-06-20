@@ -44,6 +44,7 @@ const restoredState = vscode.getState() || {};
 window.addEventListener('message', (event) => {
   const message = event.data;
   if (message?.type === 'error') {
+    raw = null;
     controls.status.textContent = message.message || 'Failed to load RAW file.';
     return;
   }
@@ -68,7 +69,6 @@ window.addEventListener('message', (event) => {
   currentSourceName = message.name;
   lockedFields = { ...lockedFields, ...(prepared.metadata.lockedFields || {}) };
   const settings = prepared.settings;
-  const expected = renderCore.expectedBytes(settings);
   const rawGuess = prepared.metadata.format === 'raw' && message.format !== 'camera-raw'
     ? renderCore.guessRawSettings(raw, settings, message.name)
     : null;
@@ -80,7 +80,9 @@ window.addEventListener('message', (event) => {
       white: 0
     });
   }
-  settings.displayMode = 'preview';
+  if (!restoredSettings) {
+    settings.displayMode = 'preview';
+  }
 
   applySettings(settings);
   controls.fileName.textContent = message.name;
@@ -308,7 +310,7 @@ function syncLockedControls() {
 
 function setZoom(value) {
   const numericValue = Number(value);
-  zoomValue = Math.max(5, Math.min(800, Math.round(Number.isFinite(numericValue) ? numericValue : 100)));
+  zoomValue = Math.max(1, Math.min(800, Math.round(Number.isFinite(numericValue) ? numericValue : 100)));
   controls.zoom.value = String(zoomValue);
   controls.zoomLabel.textContent = `${zoomValue}%`;
 

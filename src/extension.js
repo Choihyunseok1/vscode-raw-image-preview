@@ -1,6 +1,9 @@
 const vscode = require('vscode');
-const { spawn } = require('child_process');
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const crypto = require('crypto');
+const { convertCameraRawToBuffer, cameraRawExtension } = require('./camera-raw');
 
 const VIEW_TYPE = 'rawBayerPreview.viewer';
 
@@ -61,7 +64,9 @@ class RawBayerPreviewProvider {
       gain: 1,
       normalize: true
     };
-    const fileBytesPromise = loadPreviewBytes(document.uri);
+    const fileBytesPromise = loadPreviewBytes(document.uri, {
+      pythonPath: config.get('pythonPath', '')
+    });
 
     webview.onDidReceiveMessage(async (message) => {
       if (message?.type === 'ready') {
@@ -100,7 +105,7 @@ class RawBayerPreviewProvider {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
   <link href="${cssUri}" rel="stylesheet">
-  <title>RAW Bayer Preview</title>
+  <title>RAW image preview</title>
 </head>
 <body>
   <main class="app">
@@ -191,7 +196,7 @@ class RawBayerPreviewProvider {
     <section class="viewer">
       <div class="toolbar">
         <button id="zoomOut" title="Zoom out">-</button>
-        <input id="zoom" type="range" min="5" max="800" value="100">
+        <input id="zoom" type="range" min="1" max="800" value="100">
         <button id="zoomIn" title="Zoom in">+</button>
         <span id="zoomLabel">100%</span>
       </div>
@@ -208,17 +213,12 @@ class RawBayerPreviewProvider {
 }
 
 function getNonce() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let text = '';
-  for (let i = 0; i < 32; i += 1) {
-    text += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return text;
+  return crypto.randomBytes(16).toString('base64');
 }
 
-async function loadPreviewBytes(uri) {
-  if (uri.scheme === 'file' && isCameraRawPath(uri.fsPath)) {
-    return convertCameraRawToBuffer(uri.fsPath);
+async function loadPreviewBytes(uri, options = {}) {
+  if (isCameraRawPath(uri.fsPath || uri.path || uri.toString())) {
+    return convertCameraRawUriToBuffer(uri, options);
   }
   const bytes = await vscode.workspace.fs.readFile(uri);
   return {
@@ -231,124 +231,39 @@ async function loadPreviewBytes(uri) {
   };
 }
 
+async function convertCameraRawUriToBuffer(uri, options = {}) {
+  if (uri.scheme === 'file') {
+    return convertCameraRawToBuffer(uri.fsPath, {
+      ...options,
+      sourceByteLength: fs.statSync(uri.fsPath).size,
+      sourceName: uri.fsPath
+    });
+  }
+
+  const bytes = await vscode.workspace.fs.readFile(uri);
+  const tempFile = await writeTempCameraRawFile(bytes, uri);
+  try {
+    return await convertCameraRawToBuffer(tempFile, {
+      ...options,
+      sourceByteLength: bytes.byteLength,
+      sourceName: uri.path || uri.toString()
+    });
+  } finally {
+    fs.promises.unlink(tempFile).catch(() => {});
+  }
+}
+
+async function writeTempCameraRawFile(bytes, uri) {
+  const extension = cameraRawExtension(uri.path || uri.fsPath || uri.toString()).toLowerCase();
+  const suffix = extension === 'camera raw' ? 'raw' : extension;
+  const name = `raw-bayer-preview-${process.pid}-${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${suffix}`;
+  const tempFile = path.join(os.tmpdir(), name);
+  await fs.promises.writeFile(tempFile, Buffer.from(bytes));
+  return tempFile;
+}
+
 function isCameraRawPath(filePath) {
   return /\.(cr2|cr3|nef|nrw|arw|srf|sr2|dng|raf|rw2|orf|pef|srw)$/i.test(filePath);
-}
-
-function convertCameraRawToBuffer(filePath) {
-  const script = `
-import json
-import sys
-
-try:
-    import numpy as np
-    import rawpy
-except Exception as exc:
-    print("RAW_BAYER_PREVIEW_ERROR " + str(exc), file=sys.stderr)
-    sys.exit(2)
-
-path = sys.argv[1]
-with rawpy.imread(path) as raw:
-    image = raw.raw_image_visible.copy()
-    color_desc = raw.color_desc.decode("ascii", errors="ignore") if isinstance(raw.color_desc, bytes) else str(raw.color_desc)
-    pattern = "".join(color_desc[int(raw.raw_pattern[y, x])][:1] for y in range(2) for x in range(2))
-    black_levels = [float(value) for value in raw.black_level_per_channel]
-    white = int(raw.white_level) if raw.white_level is not None else int(image.max())
-    bit_depth = max(1, min(16, int(white).bit_length()))
-    metadata = {
-        "width": int(image.shape[1]),
-        "height": int(image.shape[0]),
-        "pattern": pattern if len(pattern) == 4 else "RGGB",
-        "black": min(black_levels) if black_levels else 0,
-        "white": float(white),
-        "bitDepth": int(bit_depth)
-    }
-
-image = np.ascontiguousarray(image.astype("<u2", copy=False))
-sys.stdout.buffer.write(image.tobytes(order="C"))
-print("RAW_BAYER_PREVIEW_META " + json.dumps(metadata), file=sys.stderr)
-`;
-
-  return new Promise((resolve, reject) => {
-    const child = spawn('python', ['-c', script, filePath], {
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-    const stdout = [];
-    let stdoutLength = 0;
-    let stderrText = '';
-
-    child.stdout.on('data', (chunk) => {
-      stdout.push(chunk);
-      stdoutLength += chunk.length;
-    });
-    child.stderr.on('data', (chunk) => {
-      stderrText += chunk.toString('utf8');
-    });
-    child.on('error', reject);
-    child.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(cameraRawErrorMessage(stderrText)));
-        return;
-      }
-      const metadata = parseCr2Metadata(stderrText);
-      resolve({
-        bytes: Buffer.concat(stdout, stdoutLength),
-        sourceByteLength: fs.statSync(filePath).size,
-        settings: {
-          width: metadata.width,
-          height: metadata.height,
-          channels: 1,
-          pattern: metadata.pattern,
-          bitDepth: metadata.bitDepth || 16,
-          sampleFormat: 'uint',
-          endian: 'little',
-          packing: 'unpacked',
-          black: metadata.black,
-          white: metadata.white
-        },
-        lockedFields: {
-          width: true,
-          height: true,
-          channels: true,
-          pattern: true,
-          bitDepth: true,
-          sampleFormat: true,
-          endian: true,
-          packing: true
-        },
-        format: 'camera-raw',
-        label: `${cameraRawExtension(filePath)} ${metadata.width}x${metadata.height} ${metadata.bitDepth || 16}-bit`
-      });
-    });
-  });
-}
-
-function parseCr2Metadata(stderrText) {
-  const line = stderrText
-    .split(/\r?\n/)
-    .find((entry) => entry.startsWith('RAW_BAYER_PREVIEW_META '));
-  if (!line) {
-    return {};
-  }
-  try {
-    return JSON.parse(line.slice('RAW_BAYER_PREVIEW_META '.length));
-  } catch {
-    return {};
-  }
-}
-
-function cameraRawErrorMessage(stderrText) {
-  const line = stderrText
-    .split(/\r?\n/)
-    .find((entry) => entry.startsWith('RAW_BAYER_PREVIEW_ERROR '));
-  const detail = line ? line.slice('RAW_BAYER_PREVIEW_ERROR '.length) : stderrText.trim();
-  return `Failed to decode camera RAW. Install Python rawpy/numpy for camera RAW support. ${detail}`;
-}
-
-function cameraRawExtension(filePath) {
-  const match = String(filePath || '').match(/\.([^.]+)$/);
-  return match ? match[1].toUpperCase() : 'Camera RAW';
 }
 
 function exactArrayBuffer(bytes) {
