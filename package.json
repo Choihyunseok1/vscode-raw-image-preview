@@ -276,11 +276,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Choihyunseok1/raw-bayer-preview.git"
+    "url": "https://github.com/Choihyunseok1/vscode-raw-image-preview.git"
   },
-  "homepage": "https://github.com/Choihyunseok1/raw-bayer-preview#readme",
+  "homepage": "https://github.com/Choihyunseok1/vscode-raw-image-preview#readme",
   "bugs": {
-    "url": "https://github.com/Choihyunseok1/raw-bayer-preview/issues"
+    "url": "https://github.com/Choihyunseok1/vscode-raw-image-preview/issues"
   },
   "license": "MIT",
   "devDependencies": {
