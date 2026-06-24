@@ -2,7 +2,7 @@
   "name": "raw-bayer-preview",
   "displayName": "[VSCode Extension] RAW image preview",
   "description": "Preview RAW/Bayer image buffers with bit-depth, Bayer pattern, and channel-plane controls in VS Code.",
-  "version": "0.3.14",
+  "version": "0.3.15",
   "publisher": "personal",
   "icon": "media/icon.png",
   "engines": {
