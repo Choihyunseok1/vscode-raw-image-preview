@@ -1,4 +1,4 @@
-# [VSCode Extension] RAW image preview
+# RAW image preview
 
 Preview RAW, Bayer, NumPy, PNM, and camera RAW buffers directly inside VS Code.
 
